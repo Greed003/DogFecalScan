@@ -1,6 +1,11 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:tflite_flutter/tflite_flutter.dart';
+import 'package:image/image.dart' as img;
+import 'package:flutter/services.dart'; 
+import 'package:url_launcher/url_launcher.dart'; 
 
 void main() {
   runApp(DogFecalScanApp());
@@ -204,19 +209,133 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   File? _image;
   final picker = ImagePicker();
+  Interpreter? _interpreter;
+  String _result = "No result";
+
+  @override
+  void initState() {
+    super.initState();
+    _loadModel();
+  }
+
+  Future<void> _loadModel() async {
+    try {
+      _interpreter = await Interpreter.fromAsset('model/model.tflite');
+      print("✅ Model loaded successfully");
+    } catch (e) {
+      print("❌ Failed to load model: $e");
+    }
+  }
 
   Future<void> _pickImage(ImageSource source) async {
-    final pickedFile = await picker.pickImage(source: source, imageQuality: 85);
-    if (pickedFile != null) {
-      setState(() => _image = File(pickedFile.path));
+    try {
+      final pickedFile = await picker.pickImage(
+        source: source,
+        imageQuality: 85, // reduce size if needed
+      );
+
+      if (pickedFile != null) {
+        final File imageFile = File(pickedFile.path);
+
+        setState(() {
+          _image = imageFile;
+        });
+
+        // Directly run model using the File object
+        _runModel(imageFile);
+      }
+    } catch (e) {
+      print("❌ Error picking image: $e");
+    }
+  }
+
+  Uint8List _preprocessImage(File file, int inputSize) {
+    final raw = file.readAsBytesSync();
+    img.Image? image = img.decodeImage(raw);
+
+    if (image == null) {
+      throw Exception("Failed to decode image");
+    }
+
+    // Resize to input size
+    img.Image resized = img.copyResize(image, width: inputSize, height: inputSize);
+
+    // Convert to Float32 for TensorFlow Lite
+    var floatList = Float32List(inputSize * inputSize * 3);
+    int index = 0;
+
+    for (int y = 0; y < resized.height; y++) {
+      for (int x = 0; x < resized.width; x++) {
+        final pixel = resized.getPixel(x, y); // <-- Pixel object
+
+        floatList[index++] = pixel.r / 255.0; // red
+        floatList[index++] = pixel.g / 255.0; // green
+        floatList[index++] = pixel.b / 255.0; // blue
+      }
+    }
+
+    return floatList.buffer.asUint8List();
+  }
+
+
+  Future<void> _runModel(File file) async {
+    if (_interpreter == null) {
+      print("Interpreter is null!");
+      return;
+    }
+
+    try {
+      // Get input tensor shape
+      var inputShape = _interpreter!.getInputTensor(0).shape;
+      print("Input shape: $inputShape");
+
+      int inputSize = inputShape[1];
+
+      // Preprocess the image
+      var input = _preprocessImage(file, inputSize);
+      print("Input preprocessed: ${input.length}");
+
+      // Get output tensor shape
+      var outputShape = _interpreter!.getOutputTensor(0).shape.cast<int>();
+      print("Output shape: $outputShape");
+
+      // Create output buffer with correct type
+      int outputSize = outputShape.reduce((a, b) => a * b);
+      var output = List.generate(outputSize, (_) => 0.0).reshape([1, outputShape[1]]);
+
+      // Run inference
+      _interpreter!.run(
+        input.buffer.asFloat32List().reshape([1, inputSize, inputSize, 3]),
+        output,
+      );
+
+      // Safely convert to List<double>
+      List<double> probabilities = List<double>.from(output[0]);
+
+      // Find predicted index
+      double maxValue = probabilities.reduce((a, b) => a > b ? a : b);
+      int predictedIndex = probabilities.indexOf(maxValue);
+
+      // Labels
+      List<String> labels = ["Dry", "Watery", "Normal", "Soft"];
+      String classification = labels[predictedIndex];
+      print("Predicted: $classification");
+
+      // Navigate to result screen
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => ResultScreen(imageFile: _image!),
+          builder: (_) => ResultScreen(
+            imageFile: file,
+            classification: classification,
+          ),
         ),
       );
+    } catch (e, stack) {
+      print("Error running model: $e\n$stack");
     }
   }
+
 
   @override
   Widget build(BuildContext context) {
@@ -295,11 +414,11 @@ class _HomeScreenState extends State<HomeScreen> {
                       MaterialPageRoute(builder: (_) => ContactVetScreen()));
                 }),
                 _buildMenuItem(Icons.privacy_tip, "Privacy Policy", () {
-                   Navigator.push(context,
+                  Navigator.push(context,
                       MaterialPageRoute(builder: (_) => PrivacyPolicyScreen()));
                 }),
                 _buildMenuItem(Icons.article, "Service Agreement", () {
-                   Navigator.push(context,
+                  Navigator.push(context,
                       MaterialPageRoute(builder: (_) => ServiceAgreementScreen()));
                 }),
               ],
@@ -364,8 +483,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                         padding: const EdgeInsets.symmetric(vertical: 15),
                       ),
-                      icon:
-                          const Icon(Icons.camera_alt, color: Colors.black),
+                      icon: const Icon(Icons.camera_alt, color: Colors.black),
                       label: const Text(
                         'Take a Photo',
                         style: TextStyle(color: Colors.black),
@@ -404,22 +522,60 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-/// Result Screen
+/// RESULT SCREEN
 class ResultScreen extends StatelessWidget {
   final File imageFile;
-  const ResultScreen({required this.imageFile});
+  final String classification;
+
+  const ResultScreen({
+    super.key,
+    required this.imageFile,
+    required this.classification,
+  });
+
+  // ✅ Recommendations for each classification
+  String getRecommendation() {
+    switch (classification) {
+      case "Dry":
+        return "💧 Add moisture & fiber.\n- Pumpkin, broth, wet food\n🐶 Tip: Ensure constant water access.";
+      case "Normal":
+        return "✅ Balanced stool.\n- Keep current diet of quality kibble, meat, veggies\n🐶 Tip: Avoid sudden food changes.";
+      case "Soft":
+        return "🍚 Gentle diet:\n- Rice, chicken, pumpkin\n🐶 Tip: Limit fatty treats.";
+      case "Watery":
+        return "⚠️ Vet visit if >24hrs.\n- Feed chicken & rice\n🐶 Tip: Monitor hydration closely.";
+      default:
+        return "❓ No recommendation available.";
+    }
+  }
+
+  // 🎨 Color coding for classification
+  Color getClassificationColor() {
+    switch (classification) {
+      case "Dry":
+        return Colors.brown;
+      case "Normal":
+        return Colors.green;
+      case "Soft":
+        return Colors.orange;
+      case "Watery":
+        return Colors.blue;
+      default:
+        return Colors.white;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF3B2A20), // brown background
+      backgroundColor: const Color(0xFF3B2A20), // Brown theme
       appBar: AppBar(
         backgroundColor: const Color(0xFF3B2A20),
         elevation: 0,
-        iconTheme: const IconThemeData(color: Color(0xFFD7C49E)),
+        iconTheme: const IconThemeData(color: Colors.white),
         title: const Text(
           "Result",
-          style: TextStyle(color: Color(0xFFD7C49E), fontWeight: FontWeight.bold),
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
       ),
       body: SingleChildScrollView(
@@ -427,7 +583,7 @@ class ResultScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Uploaded Image
+            // 🖼️ Uploaded Image
             ClipRRect(
               borderRadius: BorderRadius.circular(12),
               child: Image.file(
@@ -439,22 +595,22 @@ class ResultScreen extends StatelessWidget {
             ),
             const SizedBox(height: 20),
 
-            // Classification
+            // 🟢 Classification (dynamic)
             RichText(
-              text: const TextSpan(
+              text: TextSpan(
                 text: "Classification: ",
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
                   color: Colors.white,
                 ),
                 children: [
                   TextSpan(
-                    text: "Normal",
+                    text: classification,
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
-                      color: Colors.green,
+                      color: getClassificationColor(),
                     ),
                   ),
                 ],
@@ -462,12 +618,10 @@ class ResultScreen extends StatelessWidget {
             ),
             const SizedBox(height: 12),
 
-            // Recommendation
-            const Text(
-              "✅ Balanced stool.\n"
-              "- Keep current diet of quality kibble, meat, veggies\n"
-              "🐶 Tip: Avoid sudden food changes",
-              style: TextStyle(
+            // 📝 Recommendation
+            Text(
+              getRecommendation(),
+              style: const TextStyle(
                 fontSize: 15,
                 color: Colors.white,
                 height: 1.4,
@@ -586,13 +740,28 @@ class ContactVetScreen extends StatelessWidget {
     },
   ];
 
+  void _callVet(String phone) async {
+    final Uri uri = Uri(scheme: 'tel', path: phone);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri);
+    } else {
+      debugPrint("Could not launch $phone");
+    }
+  }
+
+  void _copyPhone(BuildContext context, String phone) {
+    Clipboard.setData(ClipboardData(text: phone));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text("Phone number $phone copied to clipboard")),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Group vets by city
     final cities = vets.map((v) => v["city"]).toSet().toList();
 
     return Scaffold(
-      backgroundColor: const Color(0xFF3B2A20), // brown background
+      backgroundColor: const Color(0xFF3B2A20),
       appBar: AppBar(
         backgroundColor: const Color(0xFF3B2A20),
         elevation: 0,
@@ -604,7 +773,6 @@ class ContactVetScreen extends StatelessWidget {
       ),
       body: ListView(
         children: cities.map((city) {
-          // Get vets for this city
           final cityVets = vets.where((v) => v["city"] == city).toList();
 
           return Card(
@@ -626,6 +794,9 @@ class ContactVetScreen extends StatelessWidget {
                   margin:
                       const EdgeInsets.symmetric(horizontal: 15, vertical: 5),
                   child: ListTile(
+                    onTap: () => _callVet(vet["phone"]!), // tap to call
+                    onLongPress: () =>
+                        _copyPhone(context, vet["phone"]!), // long press to copy
                     title: Text(
                       vet["clinic"]!,
                       style: const TextStyle(
@@ -638,6 +809,7 @@ class ContactVetScreen extends StatelessWidget {
                       style: const TextStyle(color: Colors.white70),
                     ),
                     isThreeLine: true,
+                    trailing: const Icon(Icons.phone, color: Colors.white),
                   ),
                 );
               }).toList(),

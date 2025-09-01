@@ -30,10 +30,13 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  tflite_flutter: ^0.10.4
+  image: ^4.2.0
   image_picker: ^1.1.2
   shared_preferences: ^2.3.0
   smooth_page_indicator: ^1.2.0
   file_picker: ^8.0.0
+  url_launcher: ^6.3.0
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
@@ -53,7 +56,7 @@ dev_dependencies:
 flutter_icons:
   android: true
   ios: true
-  image_path: "images/logo.png"
+  image_path: "images/icon.png"
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 
@@ -72,6 +75,8 @@ flutter:
     - images/camera.png
     - images/face.png
     - images/poo.png
+    - images/icon.png
+    - model/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
