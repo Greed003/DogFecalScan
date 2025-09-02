@@ -6,12 +6,16 @@ import 'package:tflite_flutter/tflite_flutter.dart';
 import 'package:image/image.dart' as img;
 import 'package:flutter/services.dart'; 
 import 'package:url_launcher/url_launcher.dart'; 
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 
 void main() {
-  runApp(DogFecalScanApp());
+  runApp(const DogFecalScanApp());
 }
 
 class DogFecalScanApp extends StatelessWidget {
+  const DogFecalScanApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -21,41 +25,47 @@ class DogFecalScanApp extends StatelessWidget {
         scaffoldBackgroundColor: Colors.black,
         primaryColor: Colors.orange,
       ),
-      home: SplashScreen(),
+      home: const EntryPoint(),
     );
   }
 }
 
-/// SPLASH SCREEN
-class SplashScreen extends StatefulWidget {
-  const SplashScreen({super.key});
+/// ENTRY POINT: Decides whether to show onboarding or home
+class EntryPoint extends StatefulWidget {
+  const EntryPoint({super.key});
 
   @override
-  State<SplashScreen> createState() => _SplashScreenState();
+  State<EntryPoint> createState() => _EntryPointState();
 }
 
-class _SplashScreenState extends State<SplashScreen> {
+class _EntryPointState extends State<EntryPoint> {
+  bool _isLoading = true;
+  bool _seenOnboarding = false;
+
   @override
   void initState() {
     super.initState();
-    Future.delayed(const Duration(seconds: 2), () {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const OnboardingScreen()),
-      );
+    _checkOnboarding();
+  }
+
+  Future<void> _checkOnboarding() async {
+    final prefs = await SharedPreferences.getInstance();
+    final seen = prefs.getBool("seenOnboarding") ?? false;
+    setState(() {
+      _seenOnboarding = seen;
+      _isLoading = false;
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      body: Center(
-        child: Image(
-          image: AssetImage("images/logo.png"),
-          height: 150,
-        ),
-      ),
-    );
+    if (_isLoading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    return _seenOnboarding ? const HomeScreen() : const OnboardingScreen();
   }
 }
 
@@ -74,7 +84,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     {
       "image": "images/logo.png",
       "title": "Dog Fecal Scan",
-      "subtitle": "A mobile app that helps check your dog's digestive health through stool analysis.",
+      "subtitle":
+          "A mobile app that helps check your dog's digestive health through stool analysis.",
       "button": "Get Started"
     },
     {
@@ -97,11 +108,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     },
   ];
 
-  void _nextPage(int index) {
+  void _nextPage(int index) async {
     if (index == onboardingData.length - 1) {
+      // Save onboarding as seen
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool("seenOnboarding", true);
+
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (_) => HomeScreen()),
+        MaterialPageRoute(builder: (_) => const HomeScreen()),
       );
     } else {
       _controller.nextPage(
@@ -523,7 +538,7 @@ class _HomeScreenState extends State<HomeScreen> {
 }
 
 /// RESULT SCREEN
-class ResultScreen extends StatelessWidget {
+class ResultScreen extends StatefulWidget {
   final File imageFile;
   final String classification;
 
@@ -533,9 +548,34 @@ class ResultScreen extends StatelessWidget {
     required this.classification,
   });
 
-  // ✅ Recommendations for each classification
+  @override
+  State<ResultScreen> createState() => _ResultScreenState();
+}
+
+class _ResultScreenState extends State<ResultScreen> {
+  @override
+  void initState() {
+    super.initState();
+    saveResult();
+  }
+
+  Future<void> saveResult() async {
+    final prefs = await SharedPreferences.getInstance();
+    final history = prefs.getStringList("history") ?? [];
+
+    final result = {
+      "date": DateTime.now().toString().split(" ")[0], // YYYY-MM-DD
+      "status": widget.classification,
+      "imagePath": widget.imageFile.path,
+    };
+
+    history.add(jsonEncode(result));
+    await prefs.setStringList("history", history);
+  }
+
+  // ✅ Recommendations
   String getRecommendation() {
-    switch (classification) {
+    switch (widget.classification) {
       case "Dry":
         return "💧 Add moisture & fiber.\n- Pumpkin, broth, wet food\n🐶 Tip: Ensure constant water access.";
       case "Normal":
@@ -549,9 +589,9 @@ class ResultScreen extends StatelessWidget {
     }
   }
 
-  // 🎨 Color coding for classification
+  // 🎨 Colors
   Color getClassificationColor() {
-    switch (classification) {
+    switch (widget.classification) {
       case "Dry":
         return Colors.brown;
       case "Normal":
@@ -568,7 +608,7 @@ class ResultScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF3B2A20), // Brown theme
+      backgroundColor: const Color(0xFF3B2A20),
       appBar: AppBar(
         backgroundColor: const Color(0xFF3B2A20),
         elevation: 0,
@@ -583,11 +623,11 @@ class ResultScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 🖼️ Uploaded Image
+            // 🖼️ Image
             ClipRRect(
               borderRadius: BorderRadius.circular(12),
               child: Image.file(
-                imageFile,
+                widget.imageFile,
                 height: 250,
                 width: double.infinity,
                 fit: BoxFit.cover,
@@ -595,7 +635,7 @@ class ResultScreen extends StatelessWidget {
             ),
             const SizedBox(height: 20),
 
-            // 🟢 Classification (dynamic)
+            // 🟢 Classification
             RichText(
               text: TextSpan(
                 text: "Classification: ",
@@ -606,7 +646,7 @@ class ResultScreen extends StatelessWidget {
                 ),
                 children: [
                   TextSpan(
-                    text: classification,
+                    text: widget.classification,
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
@@ -635,38 +675,43 @@ class ResultScreen extends StatelessWidget {
 }
 
 /// History Screen
-class HistoryScreen extends StatelessWidget {
-  final List<Map<String, dynamic>> historyData = [
-    {
-      "date": "01/05/2025",
-      "status": "Normal",
-      "color": Colors.green,
-      "icon": Icons.check_circle,
-    },
-    {
-      "date": "28/04/2025",
-      "status": "Dry",
-      "color": Colors.orange,
-      "icon": Icons.wb_sunny,
-    },
-    {
-      "date": "20/04/2025",
-      "status": "Soft",
-      "color": Colors.yellow,
-      "icon": Icons.water_drop,
-    },
-    {
-      "date": "15/04/2025",
-      "status": "Watery",
-      "color": Colors.red,
-      "icon": Icons.warning,
-    },
-  ];
+class HistoryScreen extends StatefulWidget {
+  const HistoryScreen({super.key});
+
+  @override
+  State<HistoryScreen> createState() => _HistoryScreenState();
+}
+
+class _HistoryScreenState extends State<HistoryScreen> {
+  List<Map<String, dynamic>> historyData = [];
+
+  @override
+  void initState() {
+    super.initState();
+    loadHistory();
+  }
+
+  Future<void> loadHistory() async {
+    final prefs = await SharedPreferences.getInstance();
+    final history = prefs.getStringList("history") ?? [];
+
+    setState(() {
+      historyData = history.map((e) => jsonDecode(e) as Map<String, dynamic>).toList();
+    });
+  }
+
+  Future<void> clearHistory() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove("history"); // Clear from storage
+    setState(() {
+      historyData.clear(); // Clear UI list
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF3B2A20), // Dark brown background
+      backgroundColor: const Color(0xFF3B2A20),
       appBar: AppBar(
         title: const Text(
           "History",
@@ -675,50 +720,119 @@ class HistoryScreen extends StatelessWidget {
         backgroundColor: const Color(0xFF3B2A20),
         elevation: 0,
         iconTheme: const IconThemeData(color: Color(0xFFD7C49E)),
-      ),
-      body: ListView.builder(
-        itemCount: historyData.length,
-        padding: const EdgeInsets.all(12),
-        itemBuilder: (context, index) {
-          final item = historyData[index];
-          return Container(
-            margin: const EdgeInsets.only(bottom: 12),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.white30),
-              borderRadius: BorderRadius.circular(30),
-              color: const Color(0xFF3B2A20),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                /// Date
-                Text(
-                  item["date"],
-                  style: const TextStyle(color: Colors.white, fontSize: 16),
-                ),
-
-                /// Status
-                Text(
-                  item["status"],
-                  style: TextStyle(
-                    color: item["color"],
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
+        actions: [
+          if (historyData.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.delete, color: Color(0xFFD7C49E)),
+              tooltip: "Clear History",
+              onPressed: () async {
+                final confirm = await showDialog<bool>(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    backgroundColor: const Color(0xFF3B2A20),
+                    title: const Text("Clear History", style: TextStyle(color: Colors.white)),
+                    content: const Text("Are you sure you want to clear all history?",
+                        style: TextStyle(color: Colors.white70)),
+                    actions: [
+                      TextButton(
+                        child: const Text("Cancel", style: TextStyle(color: Colors.white70)),
+                        onPressed: () => Navigator.pop(context, false),
+                      ),
+                      TextButton(
+                        child: const Text("Clear", style: TextStyle(color: Colors.redAccent)),
+                        onPressed: () => Navigator.pop(context, true),
+                      ),
+                    ],
                   ),
-                ),
+                );
 
-                /// Icon instead of image
-                Icon(
-                  item["icon"],
-                  color: item["color"],
-                  size: 28,
-                ),
-              ],
+                if (confirm == true) {
+                  clearHistory();
+                }
+              },
             ),
-          );
-        },
+        ],
       ),
+      body: historyData.isEmpty
+          ? const Center(
+              child: Text(
+                "No history yet",
+                style: TextStyle(color: Colors.white),
+              ),
+            )
+          : ListView.builder(
+              itemCount: historyData.length,
+              padding: const EdgeInsets.all(12),
+              itemBuilder: (context, index) {
+                final item = historyData[index];
+
+                Color statusColor;
+                switch (item["status"]) {
+                  case "Normal":
+                    statusColor = Colors.green;
+                    break;
+                  case "Dry":
+                    statusColor = Colors.brown;
+                    break;
+                  case "Soft":
+                    statusColor = Colors.orange;
+                    break;
+                  case "Watery":
+                    statusColor = Colors.blue;
+                    break;
+                  default:
+                    statusColor = Colors.grey;
+                }
+
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.white30),
+                    borderRadius: BorderRadius.circular(30),
+                    color: const Color(0xFF3B2A20),
+                  ),
+                  child: Row(
+                    children: [
+                      /// Image thumbnail
+                      if (item["imagePath"] != null && File(item["imagePath"]).existsSync())
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.file(
+                            File(item["imagePath"]),
+                            width: 50,
+                            height: 50,
+                            fit: BoxFit.cover,
+                          ),
+                        )
+                      else
+                        const Icon(Icons.image_not_supported, color: Colors.white54),
+
+                      const SizedBox(width: 12),
+
+                      /// Details
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            item["date"],
+                            style: const TextStyle(color: Colors.white, fontSize: 14),
+                          ),
+                          Text(
+                            item["status"],
+                            style: TextStyle(
+                              color: statusColor,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
     );
   }
 }
