@@ -169,7 +169,7 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _isLoading = true; 
     });
-    await Future.delayed(const Duration(seconds: 2));
+    await Future.delayed(const Duration(seconds: 3));
 
     try {
       var inputShape = _interpreter!.getInputTensor(0).shape;
@@ -508,13 +508,17 @@ class _ResultScreenState extends State<ResultScreen>
   String getRecommendation() {
     switch (widget.classification) {
       case "Dry":
-        return "💧 Your dog may be dehydrated. Provide water and add fiber to meals.";
+        return "💧 Ensure adequate water intake; add wet food or fiber-rich diet (boiled squash, banana, or plain yogurt).";
       case "Normal":
-        return "✅ Healthy stool. Maintain current diet and exercise routine.";
+        return "✅ Maintain a balanced diet; continue regular feeding. Include rice, boiled chicken, and vegetables like carrots or pumpkin.";
       case "Soft":
-        return "🥣 Soft stool could mean stress or mild upset. Offer bland food like chicken and rice.";
+        return "🥣 Gradually shift to high-quality natural food (boiled egg, pumpkin, or rice). Avoid sudden food changes or excessive treats.";
       case "Loose":
-        return "⚠️ Possible diarrhea. Monitor hydration and visit a vet if it continues.";
+        return "⚠️ Withhold solid food for 12 to 24 hrs; give clean water and homemade electrolyte solution (1 tsp salt + 1 tbsp sugar per liter of water). Feed bland diet afterward (boiled chicken and rice). Consult vet if persists.";
+      case "With Parasite":
+        return "⚠️ Deworm as prescribed by a vet. Feed easily digestible, natural meals (boiled sweet potato, squash, or egg). Keep the feeding area clean.";
+      case "With Blood":
+        return "⚠️ Seek immediate vet advice. Temporarily give soft, bland meals (rice, pumpkin, boiled chicken). Avoid fatty or processed foods.";
       default:
         return "ℹ️ No specific recommendation available.";
     }
