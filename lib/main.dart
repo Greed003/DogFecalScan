@@ -94,6 +94,9 @@ class _HomeScreenState extends State<HomeScreen> {
   final double bloodThreshold = 0.70;
   String _result = "No result";
   bool _isLoading = false;
+  bool _modelsLoaded = false;
+  double _loadingProgress = 0.0;
+  String _loadingStage = "Starting...";
   // ✅ Match Python class_names order
   final List<String> _labels = ["Dry", "Watery", "Normal", "Soft"];
 
@@ -105,31 +108,31 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _loadModel() async {
     try {
-      print("⏳ Loading classification model...");
+      setState(() {
+        _isLoading = true;
+      });
+
+      print("⏳ Loading models...");
 
       // ---- CLASSIFICATION MODEL ----
       _interpreter = await Interpreter.fromAsset(
         'model/v2.tflite',
         options: InterpreterOptions()
           ..threads = 4
-          ..useNnApiForAndroid = true, // ⚡ Faster inference
+          ..useNnApiForAndroid = true,
       );
 
       print("✅ Classification model loaded.");
 
-
       // ---- YOLO PARASITE MODEL ----
-      print("⏳ Loading YOLO parasite model...");
-
       _yoloInterpreter = await Interpreter.fromAsset(
         'model/yolov8_parasite.tflite',
         options: InterpreterOptions()
           ..threads = 4
-          ..useNnApiForAndroid = true, // ⚡ Speed boost for YOLO
+          ..useNnApiForAndroid = true,
       );
 
       print("🟢 YOLO model loaded successfully");
-
 
       // ---- LOAD YOLO LABELS ----
       final labelData = await rootBundle.loadString('model/plabels.txt');
@@ -139,8 +142,6 @@ class _HomeScreenState extends State<HomeScreen> {
       print("🏷️ YOLO labels loaded: $_yoloLabels");
 
       // ---- YOLO BLOOD MODEL ----
-      print("⏳ Loading YOLO blood model...");
-
       _bloodInterpreter = await Interpreter.fromAsset(
         'model/yolov8_blood.tflite',
         options: InterpreterOptions()
@@ -160,25 +161,50 @@ class _HomeScreenState extends State<HomeScreen> {
 
       print("🏷️ Blood YOLO labels loaded: $_bloodLabels");
 
-      // ---- LOG CLASSIFICATION INPUT SHAPE ----
+      // ---- LOG INPUT SHAPES ----
       var input1 = _interpreter!.getInputTensor(0);
       print("📏 Classification Input: shape=${input1.shape}, type=${input1.type}");
 
-      // ---- LOG YOLO INPUT SHAPE ----
       var yoloInput = _yoloInterpreter!.getInputTensor(0);
       print("📏 YOLO Input: shape=${yoloInput.shape}, type=${yoloInput.type}");
 
-      // HELP: If input type is int8 or uint8, preprocessing MUST follow
-      print("🔍 YOLO input type is: ${yoloInput.type}");
-
       print("🔥 Models fully initialized.");
+
+      // ✅ Models successfully loaded
+      setState(() {
+        _modelsLoaded = true;
+        _isLoading = false;
+      });
+
     } catch (e) {
       print("❌ Failed to load model: $e");
+      setState(() {
+        _isLoading = false;
+        _modelsLoaded = false;
+      });
     }
   }
   
   Future<void> _pickImage(ImageSource source) async {
     try {
+      // ✅ Check if models are loaded before proceeding
+      if (!_modelsLoaded) {
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text("Models Not Ready"),
+            content: const Text("Please wait for the models to finish loading."),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text("OK"),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+
       final pickedFile = await picker.pickImage(source: source, imageQuality: 85);
 
       if (pickedFile != null) {
@@ -351,181 +377,257 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _runModel(File file, {required ImageSource source}) async {
-    if (_interpreter == null) return;
-    setState(() { _isLoading = true; });
-    await Future.delayed(const Duration(seconds: 3));
-    try {
-      var inputShape = _interpreter!.getInputTensor(0).shape;
-      int inputSize = inputShape[1];
+Future<void> _runModel(File file, {required ImageSource source}) async {
+  if (_interpreter == null) return;
+  
+  print("🔄 Starting _runModel - setting isLoading to true");
+  setState(() { 
+    _isLoading = true;
+    _loadingProgress = 0.0;
+    _loadingStage = "Initializing...";
+  });
+  
+  try {
+    // Add initial delay to ensure loading UI is visible
+    
+    setState(() {
+      _loadingProgress = 10.0;
+      _loadingStage = "Processing image...";
+    });
+    await Future.delayed(const Duration(milliseconds: 250));
+    
+    print("🔄 Running classification model...");
+    var inputShape = _interpreter!.getInputTensor(0).shape;
+    int inputSize = inputShape[1];
 
-      final Float32List inputBuffer = _preprocessImage(file, inputSize);
+    final Float32List inputBuffer = _preprocessImage(file, inputSize);
 
-      var outputShape = _interpreter!.getOutputTensor(0).shape;
-      var outputBuffer = List.generate(1, (_) => List.filled(outputShape[1], 0.0));
+    var outputShape = _interpreter!.getOutputTensor(0).shape;
+    var outputBuffer = List.generate(1, (_) => List.filled(outputShape[1], 0.0));
 
-      _interpreter!.run(
-        inputBuffer.reshape([1, inputSize, inputSize, 3]),
-        outputBuffer,
-      );
+    _interpreter!.run(
+      inputBuffer.reshape([1, inputSize, inputSize, 3]),
+      outputBuffer,
+    );
 
-      List<double> probabilities = List<double>.from(outputBuffer[0]);
-      int predictedIndex = probabilities.indexOf(
-        probabilities.reduce((a, b) => a > b ? a : b),
-      );
-      double maxValue = probabilities[predictedIndex];
+    List<double> probabilities = List<double>.from(outputBuffer[0]);
+    int predictedIndex = probabilities.indexOf(
+      probabilities.reduce((a, b) => a > b ? a : b),
+    );
+    double maxValue = probabilities[predictedIndex];
 
-      print("Prediction: ${_labels[predictedIndex]} ($maxValue)");
-      setState(() { _isLoading = false; });
-      // ❗ ONLY STOP LOADING AFTER DECISION
-      if (maxValue < 0.69) {
+    print("🎯 Prediction: ${_labels[predictedIndex]} ($maxValue)");
+    setState(() {
+      _loadingProgress = 40.0;
+      _loadingStage = "Analyzing stool type...";
+    });
+    await Future.delayed(const Duration(milliseconds: 250));
 
-        final retryLabel =
-            source == ImageSource.camera ? "Retake Photo" : "Upload Again";
+    if (maxValue < 0.69) {
+      final retryLabel = source == ImageSource.camera ? "Retake Photo" : "Upload Again";
 
-        showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text("Try Again"),
-            content: const Text(
-              "We couldn't classify this stool image.\n"
-              "Please try again with a clearer and closer photo.",
+      print("❌ Low confidence - showing retry dialog");
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text("Try Again"),
+          content: const Text(
+            "We couldn't classify this stool image.\n"
+            "Please try again with a clearer and closer photo.",
+          ),
+          actions: [
+            TextButton(
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.white,
+                backgroundColor: Colors.brown,
+              ),
+              onPressed: () {
+                Navigator.pop(context);
+                setState(() { 
+                  _isLoading = false; 
+                });
+                _pickImage(source);
+              },
+              child: Text(retryLabel),
             ),
-            actions: [
-              TextButton(
-                style: TextButton.styleFrom(
-                  foregroundColor: Colors.white,
-                  backgroundColor: Colors.brown,
-                ),
-                onPressed: () {
-                  Navigator.pop(context);
-                  _pickImage(source);
-                },
-                child: Text(retryLabel),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text("Cancel"),
-              ),
-            ],
-          ),
-        );
-        return;
-      }
-
-      // Run parasite YOLO
-      final parasiteStatus = await detectParasiteStatus(file);
-
-      // Run blood YOLO
-      final bloodStatus = await detectBloodStatus(file);
-
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => ResultScreen(
-            imageFile: file,
-            classification: _labels[predictedIndex],
-            confidence: maxValue,
-            parasiteDetections: parasiteStatus,
-            bloodDetections: bloodStatus,
-          ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                setState(() { 
+                  _isLoading = false; 
+                });
+              },
+              child: const Text("Cancel"),
+            ),
+          ],
         ),
       );
-    } catch (e, stack) {
-      setState(() { _isLoading = false; });
-      print("❌ Error running model: $e\n$stack");
+      return;
     }
+    
+    setState(() {
+      _loadingProgress = 60.0;
+      _loadingStage = "Checking for parasites...";
+    });
+     await Future.delayed(const Duration(milliseconds: 250));
+    print("🔄 Running parasite detection...");
+    final parasiteStatus = await detectParasiteStatus(file);
+    
+    setState(() {
+      _loadingProgress = 80.0;
+      _loadingStage = "Checking for blood...";
+    });
+    
+    await Future.delayed(const Duration(milliseconds: 250));
+    print("🔄 Running blood detection...");
+    final bloodStatus = await detectBloodStatus(file);
+
+    setState(() {
+      _loadingProgress = 95.0;
+      _loadingStage = "Finalizing results...";
+    });
+
+    // Add artificial delay to show loading for at least 1.5 seconds total
+    await Future.delayed(const Duration(milliseconds: 250));
+
+    setState(() {
+      _loadingProgress = 100.0;
+      _loadingStage = "Complete!";
+    });
+
+    await Future.delayed(const Duration(milliseconds: 300));
+
+    print("🔄 All models completed - setting isLoading to false");
+    setState(() { 
+      _isLoading = false; 
+    });
+
+    print("🔄 Navigating to results screen");
+    if (!mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ResultScreen(
+          imageFile: file,
+          classification: _labels[predictedIndex],
+          confidence: maxValue,
+          parasiteDetections: parasiteStatus,
+          bloodDetections: bloodStatus,
+        ),
+      ),
+    );
+
+  } catch (e, stack) {
+    print("❌ Error in _runModel: $e\n$stack");
+    setState(() { 
+      _isLoading = false; 
+    });
+  }
+}
+
+  Widget _buildMenuItem(IconData icon, String title, VoidCallback onTap) {
+    return ListTile(
+      leading: Icon(icon, color: const Color(0xFFCBBD93)),
+      title: Text(
+        title,
+        style: const TextStyle(color: Color(0xFFCBBD93)),
+      ),
+      onTap: () {
+        Navigator.pop(context);
+        onTap();
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        Scaffold(
-          backgroundColor: Colors.black,
-          appBar: AppBar(
-            backgroundColor: Colors.black,
-            elevation: 0,
-            titleSpacing: 0,
-            title: Row(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8.0),
-                  child: ClipOval(
-                    child: Image.asset(
-                      'images/logo.png',
-                      height: 32,
-                      width: 32,
-                      fit: BoxFit.cover,
-                    ),
-                  ),
-                ),
-                const Text(
-                  'Dog Fecal Scan',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFFCBBD93),
-                  ),
-                ),
-              ],
-            ),
-            actions: [
-              Builder(
-                builder: (context) => IconButton(
-                  icon: const Icon(Icons.menu, color: Color(0xFFCBBD93)),
-                  iconSize: 28,
-                  onPressed: () {
-                    Scaffold.of(context).openEndDrawer();
-                  },
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        elevation: 0,
+        titleSpacing: 0,
+        title: Row(
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8.0),
+              child: ClipOval(
+                child: Image.asset(
+                  'images/logo.png',
+                  height: 32,
+                  width: 32,
+                  fit: BoxFit.cover,
                 ),
               ),
-            ],
+            ),
+            const Text(
+              'DogFecalScan',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Color(0xFFCBBD93),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          Builder(
+            builder: (context) => IconButton(
+              icon: const Icon(Icons.menu, color: Color(0xFFCBBD93)),
+              iconSize: 28,
+              onPressed: () {
+                Scaffold.of(context).openEndDrawer();
+              },
+            ),
           ),
-          endDrawer: Drawer(
-            backgroundColor: const Color(0xFF4B2E1E),
-            child: SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+        ],
+      ),
+      endDrawer: Drawer(
+        backgroundColor: const Color(0xFF4B2E1E),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text(
-                          "Menu",
-                          style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFFCBBD93),
-                          ),
-                        ),
-                        IconButton(
-                          icon:
-                              const Icon(Icons.close, color: Color(0xFFCBBD93)),
-                          onPressed: () => Navigator.pop(context),
-                        ),
-                      ],
+                    const Text(
+                      "Menu",
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFFCBBD93),
+                      ),
                     ),
-                    const SizedBox(height: 8), 
-                    _buildMenuItem(Icons.history, "History", () { 
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => HistoryScreen())); 
-                    }), 
-                    _buildMenuItem(Icons.medical_services, "Contact Vet", () { 
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => ContactVetScreen())); 
-                    }), 
-                    _buildMenuItem(Icons.privacy_tip, "Privacy Policy", () { 
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => PrivacyPolicyScreen())); 
-                    }), 
-                    _buildMenuItem(Icons.article, "Terms and Conditions", () { 
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => TermsAndConditionsScreen())); 
-                    }),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: Color(0xFFCBBD93)),
+                      onPressed: () => Navigator.pop(context),
+                    ),
                   ],
                 ),
-              ),
+                const SizedBox(height: 8),
+                _buildMenuItem(Icons.history, "History", () {
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => HistoryScreen()));
+                }),
+                _buildMenuItem(Icons.medical_services, "Contact Vet", () {
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => ContactVetScreen()));
+                }),
+                _buildMenuItem(Icons.privacy_tip, "Privacy Policy", () {
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => PrivacyPolicyScreen()));
+                }),
+                _buildMenuItem(Icons.article, "Terms and Conditions", () {
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => TermsAndConditionsScreen()));
+                }),
+              ],
             ),
           ),
-          body: SafeArea(
+        ),
+      ),
+      body: Stack(
+        children: [
+          // Main Content
+          SafeArea(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -549,45 +651,42 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 const Spacer(),
                 Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16.0, vertical: 20),
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 20),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
                       Expanded(
                         child: ElevatedButton.icon(
-                          onPressed: () => _pickImage(ImageSource.gallery),
+                          onPressed: _modelsLoaded ? () => _pickImage(ImageSource.gallery) : null,
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFFD6B588),
+                            backgroundColor: _modelsLoaded ? const Color(0xFFD6B588) : Colors.grey,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12),
                             ),
                             padding: const EdgeInsets.symmetric(vertical: 15),
                           ),
-                          icon:
-                              const Icon(Icons.upload, color: Colors.black),
-                          label: const Text(
+                          icon: Icon(Icons.upload, color: _modelsLoaded ? Colors.black : Colors.white),
+                          label: Text(
                             'Upload',
-                            style: TextStyle(color: Colors.black),
+                            style: TextStyle(color: _modelsLoaded ? Colors.black : Colors.white),
                           ),
                         ),
                       ),
                       const SizedBox(width: 16),
                       Expanded(
                         child: ElevatedButton.icon(
-                          onPressed: () => _pickImage(ImageSource.camera),
+                          onPressed: _modelsLoaded ? () => _pickImage(ImageSource.camera) : null,
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFFD6B588),
+                            backgroundColor: _modelsLoaded ? const Color(0xFFD6B588) : Colors.grey,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12),
                             ),
                             padding: const EdgeInsets.symmetric(vertical: 15),
                           ),
-                          icon: const Icon(Icons.camera_alt,
-                              color: Colors.black),
-                          label: const Text(
+                          icon: Icon(Icons.camera_alt, color: _modelsLoaded ? Colors.black : Colors.white),
+                          label: Text(
                             'Take a Photo',
-                            style: TextStyle(color: Colors.black),
+                            style: TextStyle(color: _modelsLoaded ? Colors.black : Colors.white),
                           ),
                         ),
                       ),
@@ -597,43 +696,102 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
           ),
-        ),
 
-        // 🔥 Loading Overlay
-        if (_isLoading)
-          Container(
-            color: Colors.black54,
-            child: const Center(
-              child: CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+          // Model Loading Overlay
+          if (_isLoading && !_modelsLoaded)
+            Container(
+              color: Colors.black87,
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const CircularProgressIndicator(
+                      valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFD6B588)),
+                    ),
+                    const SizedBox(height: 20),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 40.0),
+                      child: Text(
+                        "Loading models...",
+                        style: const TextStyle(
+                          color: Color(0xFFCBBD93),
+                          fontSize: 18,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ],
+                ),
               ),
+            ),
+
+// Image Processing Overlay - Simple Design
+if (_isLoading && _modelsLoaded)
+  Container(
+    width: MediaQuery.of(context).size.width,
+    height: MediaQuery.of(context).size.height,
+    color: Colors.black87,
+    child: Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          // Loading Text
+          Text(
+            _loadingStage,
+            style: const TextStyle(
+              color: Color(0xFFCBBD93),
+              fontSize: 18,
+              fontWeight: FontWeight.w500,
             ),
           ),
-      ],
-    );
-  }
-
-  Widget _buildMenuItem(IconData icon, String title, VoidCallback onTap) {
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        child: Row(
-          children: [
-            Icon(icon, color: const Color(0xFFCBBD93)),
-            const SizedBox(width: 12),
-            Text(
-              title,
-              style: const TextStyle(
-                fontSize: 16,
-                color: Color(0xFFCBBD93),
-              ),
+          
+          const SizedBox(height: 30),
+          
+          // Progress Bar Container
+          Container(
+            width: MediaQuery.of(context).size.width * 0.7,
+            height: 8,
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.3),
+              borderRadius: BorderRadius.circular(4),
             ),
-          ],
-        ),
+            child: Stack(
+              children: [
+                // Progress Fill
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeOut,
+                  width: (MediaQuery.of(context).size.width * 0.7) * (_loadingProgress / 100),
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFD6B588),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          
+          const SizedBox(height: 15),
+          
+          // Percentage
+          Text(
+            "${_loadingProgress.toInt()}%",
+            style: const TextStyle(
+              color: Color(0xFFCBBD93),
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    ),
+  ),
+        ],
       ),
     );
-  }
+  }     
 }
 
 /// RESULT SCREEN
@@ -1002,7 +1160,7 @@ class _ResultScreenState extends State<ResultScreen>
   int _getPriorityLevel(String recommendation) {
     if (recommendation.contains('immediate vet') || recommendation.contains('emergency')) {
       return 3;
-    } else if (recommendation.contains('vet advice') || recommendation.contains('Withhold food')) {
+    } else if (recommendation.contains('vet advice') || recommendation.contains('Withhold food')||recommendation.contains('adequate water')) {
       return 2;
     } else if (recommendation.contains('⚠️') || recommendation.contains('Consult vet')) {
       return 1;
@@ -1183,7 +1341,7 @@ class _ResultScreenState extends State<ResultScreen>
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              "Additional Findings:",
+                              "Additional Findings",
                               style: TextStyle(
                                 fontSize: 18,
                                 fontWeight: FontWeight.bold,

@@ -204,7 +204,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  "Additional Findings:",
+                                  "Additional Findings",
                                   style: TextStyle(
                                     fontSize: 18,
                                     fontWeight: FontWeight.bold,
@@ -237,11 +237,11 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                               ),
                                               children: [
                                                 TextSpan(
-                                                  text: "Parasite ",
+                                                  text: "Parasite",
                                                   style: TextStyle(fontWeight: FontWeight.bold),
                                                 ),
                                                 TextSpan(
-                                                  text: "(${parasiteConfidence.toStringAsFixed(2)}% confidence)",
+                                                  text: " (${parasiteConfidence.toStringAsFixed(2)}% confidence)",
                                                   style: TextStyle(
                                                     fontSize: 14,
                                                     fontStyle: FontStyle.italic,
@@ -387,12 +387,12 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
     if (parasiteStatus != null && parasiteStatus != "none") {
       final parasiteConfidence = double.tryParse(item["parasiteConfidence"].toString()) ?? 0;
-      findings.add("Parasite(${parasiteConfidence.toStringAsFixed(2)}%)");
+      findings.add("Parasite (${parasiteConfidence.toStringAsFixed(2)}%)");
     }
 
     if (bloodStatus != null && bloodStatus != "none") {
       final bloodConfidence = double.tryParse(item["bloodConfidence"].toString()) ?? 0;
-      findings.add("Blood(${bloodConfidence.toStringAsFixed(2)}%)");
+      findings.add("Blood (${bloodConfidence.toStringAsFixed(2)}%)");
     }
 
     return findings.isEmpty ? "Additional Findings: None" : "Additional Findings: ${findings.join(", ")}";
