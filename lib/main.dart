@@ -12,6 +12,7 @@ import 'package:flutter_application_1/terms.dart';
 import 'package:flutter_application_1/contact.dart';
 import 'package:flutter_application_1/history.dart';
 import 'package:flutter_application_1/onboarding.dart';
+import 'package:flutter/services.dart' show rootBundle;
 
 void main() {
   runApp(const DogFecalScanApp());
@@ -85,10 +86,16 @@ class _HomeScreenState extends State<HomeScreen> {
   File? _image;
   final picker = ImagePicker();
   Interpreter? _interpreter;
+  Interpreter? _yoloInterpreter;
+  List<String> _yoloLabels = [];
+  final double parasiteThreshold = 0.70;
+  Interpreter? _bloodInterpreter;
+  List<String> _bloodLabels = [];
+  final double bloodThreshold = 0.70;
   String _result = "No result";
   bool _isLoading = false;
   // ✅ Match Python class_names order
-  final List<String> _labels = ["Dry", "Loose", "Normal", "Soft"];
+  final List<String> _labels = ["Dry", "Watery", "Normal", "Soft"];
 
   @override
   void initState() {
@@ -98,17 +105,78 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _loadModel() async {
     try {
-      _interpreter = await Interpreter.fromAsset('model/v2.tflite');
-      print("✅ Model loaded successfully");
+      print("⏳ Loading classification model...");
 
-      // 🔍 Log input details
-      var input = _interpreter!.getInputTensor(0);
-      print("📏 Input tensor: shape=${input.shape}, type=${input.type}");
+      // ---- CLASSIFICATION MODEL ----
+      _interpreter = await Interpreter.fromAsset(
+        'model/v2.tflite',
+        options: InterpreterOptions()
+          ..threads = 4
+          ..useNnApiForAndroid = true, // ⚡ Faster inference
+      );
+
+      print("✅ Classification model loaded.");
+
+
+      // ---- YOLO PARASITE MODEL ----
+      print("⏳ Loading YOLO parasite model...");
+
+      _yoloInterpreter = await Interpreter.fromAsset(
+        'model/yolov8_parasite.tflite',
+        options: InterpreterOptions()
+          ..threads = 4
+          ..useNnApiForAndroid = true, // ⚡ Speed boost for YOLO
+      );
+
+      print("🟢 YOLO model loaded successfully");
+
+
+      // ---- LOAD YOLO LABELS ----
+      final labelData = await rootBundle.loadString('model/plabels.txt');
+      _yoloLabels =
+          labelData.split('\n').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+
+      print("🏷️ YOLO labels loaded: $_yoloLabels");
+
+      // ---- YOLO BLOOD MODEL ----
+      print("⏳ Loading YOLO blood model...");
+
+      _bloodInterpreter = await Interpreter.fromAsset(
+        'model/yolov8_blood.tflite',
+        options: InterpreterOptions()
+          ..threads = 4
+          ..useNnApiForAndroid = true,
+      );
+
+      print("🩸 YOLO blood model loaded successfully");
+
+      // ---- LOAD BLOOD LABELS ----
+      final blabelData = await rootBundle.loadString('model/blabels.txt');
+      _bloodLabels = blabelData
+          .split('\n')
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
+
+      print("🏷️ Blood YOLO labels loaded: $_bloodLabels");
+
+      // ---- LOG CLASSIFICATION INPUT SHAPE ----
+      var input1 = _interpreter!.getInputTensor(0);
+      print("📏 Classification Input: shape=${input1.shape}, type=${input1.type}");
+
+      // ---- LOG YOLO INPUT SHAPE ----
+      var yoloInput = _yoloInterpreter!.getInputTensor(0);
+      print("📏 YOLO Input: shape=${yoloInput.shape}, type=${yoloInput.type}");
+
+      // HELP: If input type is int8 or uint8, preprocessing MUST follow
+      print("🔍 YOLO input type is: ${yoloInput.type}");
+
+      print("🔥 Models fully initialized.");
     } catch (e) {
       print("❌ Failed to load model: $e");
     }
   }
-
+  
   Future<void> _pickImage(ImageSource source) async {
     try {
       final pickedFile = await picker.pickImage(source: source, imageQuality: 85);
@@ -163,14 +231,130 @@ class _HomeScreenState extends State<HomeScreen> {
     return floatList;
   }
 
+  List<double> _yoloPreprocessDouble(File file, int inputSize) {
+    final raw = file.readAsBytesSync();
+    img.Image? decoded = img.decodeImage(raw);
+    if (decoded == null) throw Exception("YOLO decode error");
+
+    // Resize to model input
+    img.Image resized =
+        img.copyResize(decoded, width: inputSize, height: inputSize);
+
+    final List<double> floatList = List.filled(inputSize * inputSize * 3, 0.0);
+    int index = 0;
+
+    for (int y = 0; y < resized.height; y++) {
+      for (int x = 0; x < resized.width; x++) {
+        final pixel = resized.getPixel(x, y);
+
+        // Normalize to 0.0 - 1.0
+        floatList[index++] = pixel.r / 255.0;
+        floatList[index++] = pixel.g / 255.0;
+        floatList[index++] = pixel.b / 255.0;
+      }
+    }
+
+    return floatList;
+  }
+
+  Future<Map<String, dynamic>> detectBloodStatus(File file) async {
+    if (_bloodInterpreter == null) return {"status": "none", "confidence": 0.0};
+
+    final raw = file.readAsBytesSync();
+    img.Image? decoded = img.decodeImage(raw);
+    if (decoded == null) return {"status": "none", "confidence": 0.0};
+
+    var inputShape = _bloodInterpreter!.getInputTensor(0).shape;
+    int inputH = inputShape[1];
+    int inputW = inputShape[2];
+
+    List<double> input = _yoloPreprocessDouble(file, inputW);
+
+    var outputTensor = _bloodInterpreter!.getOutputTensor(0);
+    List outputShape = outputTensor.shape;
+
+    List<List<List<double>>> outputBuffer = [
+      List.generate(outputShape[1], (_) => List.filled(outputShape[2], 0.0))
+    ];
+
+    _bloodInterpreter!.run(
+      input.reshape([1, inputH, inputW, 3]),
+      outputBuffer,
+    );
+
+    List<double> validScores = [];
+
+    // Collect all detections above threshold
+    for (var det in outputBuffer[0]) {
+      double score = det[4];
+      if (score >= bloodThreshold) {
+        validScores.add(score);
+      }
+    }
+
+    if (validScores.isNotEmpty) {
+      double avgConfidence =
+          validScores.reduce((a, b) => a + b) / validScores.length;
+      
+      print("🩸 Blood detected! Average confidence: ${avgConfidence.toStringAsFixed(4)}");
+      return {"status": "with_blood", "confidence": avgConfidence};
+    } else {
+      print("🩸 No blood detected");
+      return {"status": "none", "confidence": 0.0};
+    }
+  }
+
+  Future<Map<String, dynamic>> detectParasiteStatus(File file) async {
+    if (_yoloInterpreter == null) return {"status": "none", "confidence": 0.0};
+
+    final raw = file.readAsBytesSync();
+    img.Image? decoded = img.decodeImage(raw);
+    if (decoded == null) return {"status": "none", "confidence": 0.0};
+
+    var inputShape = _yoloInterpreter!.getInputTensor(0).shape;
+    int inputH = inputShape[1];
+    int inputW = inputShape[2];
+
+    List<double> input = _yoloPreprocessDouble(file, inputW);
+
+    var outputTensor = _yoloInterpreter!.getOutputTensor(0);
+    List outputShape = outputTensor.shape;
+
+    List<List<List<double>>> outputBuffer = [
+      List.generate(outputShape[1], (_) => List.filled(outputShape[2], 0.0))
+    ];
+
+    _yoloInterpreter!.run(
+      input.reshape([1, inputH, inputW, 3]),
+      outputBuffer,
+    );
+
+    List<double> validScores = [];
+
+    // Collect all detections ≥ threshold
+    for (var det in outputBuffer[0]) {
+      double score = det[4]; // confidence
+      if (score >= parasiteThreshold) {
+        validScores.add(score);
+      }
+    }
+
+    if (validScores.isNotEmpty) {
+      double avgConfidence =
+          validScores.reduce((a, b) => a + b) / validScores.length;
+
+      print("🐛 Parasite detected! Average confidence: ${avgConfidence.toStringAsFixed(4)}");
+      return {"status": "with_parasite", "confidence": avgConfidence};
+    } else {
+      print("🐛 No parasite detected.");
+      return {"status": "none", "confidence": 0.0};
+    }
+  }
+
   Future<void> _runModel(File file, {required ImageSource source}) async {
     if (_interpreter == null) return;
-
-    setState(() {
-      _isLoading = true; 
-    });
+    setState(() { _isLoading = true; });
     await Future.delayed(const Duration(seconds: 3));
-
     try {
       var inputShape = _interpreter!.getInputTensor(0).shape;
       int inputSize = inputShape[1];
@@ -191,14 +375,13 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       double maxValue = probabilities[predictedIndex];
 
-      print("✅ Prediction: ${_labels[predictedIndex]} (${(maxValue * 100).toStringAsFixed(2)}%)");
-
-      setState(() {
-        _isLoading = false;
-      });
-
+      print("Prediction: ${_labels[predictedIndex]} ($maxValue)");
+      setState(() { _isLoading = false; });
+      // ❗ ONLY STOP LOADING AFTER DECISION
       if (maxValue < 0.69) {
-        final retryLabel = source == ImageSource.camera ? "Retake Photo" : "Upload Again";
+
+        final retryLabel =
+            source == ImageSource.camera ? "Retake Photo" : "Upload Again";
 
         showDialog(
           context: context,
@@ -206,7 +389,7 @@ class _HomeScreenState extends State<HomeScreen> {
             title: const Text("Try Again"),
             content: const Text(
               "We couldn't classify this stool image.\n"
-              "Please try again with a clearer and closer photo under good lighting.",
+              "Please try again with a clearer and closer photo.",
             ),
             actions: [
               TextButton(
@@ -216,7 +399,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 onPressed: () {
                   Navigator.pop(context);
-                  _pickImage(source); 
+                  _pickImage(source);
                 },
                 child: Text(retryLabel),
               ),
@@ -230,6 +413,12 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
 
+      // Run parasite YOLO
+      final parasiteStatus = await detectParasiteStatus(file);
+
+      // Run blood YOLO
+      final bloodStatus = await detectBloodStatus(file);
+
       Navigator.push(
         context,
         MaterialPageRoute(
@@ -237,13 +426,13 @@ class _HomeScreenState extends State<HomeScreen> {
             imageFile: file,
             classification: _labels[predictedIndex],
             confidence: maxValue,
+            parasiteDetections: parasiteStatus,
+            bloodDetections: bloodStatus,
           ),
         ),
       );
     } catch (e, stack) {
-      setState(() {
-        _isLoading = false; 
-      });
+      setState(() { _isLoading = false; });
       print("❌ Error running model: $e\n$stack");
     }
   }
@@ -452,12 +641,15 @@ class ResultScreen extends StatefulWidget {
   final File imageFile;
   final String classification;
   final double confidence;
-
+  final Map<String, dynamic> parasiteDetections;
+  final Map<String, dynamic> bloodDetections;
   const ResultScreen({
     super.key,
     required this.imageFile,
     required this.classification,
     required this.confidence,
+    required this.parasiteDetections,
+    required this.bloodDetections,
   });
 
   @override
@@ -494,33 +686,370 @@ class _ResultScreenState extends State<ResultScreen>
     final prefs = await SharedPreferences.getInstance();
     final history = prefs.getStringList("history") ?? [];
 
+    // Get the combined recommendations
+    final recommendations = getCombinedRecommendations();
+
     final result = {
-      "date": DateTime.now().toString().split(" ")[0],
+      "date": DateTime.now().toIso8601String().split("T")[0],
       "status": widget.classification,
       "confidence": double.parse((widget.confidence * 100).toStringAsFixed(2)),
       "imagePath": widget.imageFile.path,
+      "parasite": widget.parasiteDetections['status'],
+      "parasiteConfidence": double.parse((widget.parasiteDetections['confidence'] * 100).toStringAsFixed(2)),
+      "blood": widget.bloodDetections['status'],
+      "bloodConfidence": double.parse((widget.bloodDetections['confidence'] * 100).toStringAsFixed(2)),
+      "recommendations": jsonEncode(recommendations), // Save recommendations as JSON string
     };
 
     history.add(jsonEncode(result));
     await prefs.setStringList("history", history);
   }
 
-  String getRecommendation() {
-    switch (widget.classification) {
+  List<String> getAbnormalityList() {
+    List<String> abnormalities = [];
+
+    // Check parasite detection
+    if (widget.parasiteDetections['status'] != null &&
+        widget.parasiteDetections['status'] != "none") {
+      abnormalities.add("With Parasite");
+    }
+
+    // Check blood detection
+    if (widget.bloodDetections['status'] != null &&
+        widget.bloodDetections['status'] != "none") {
+      abnormalities.add("With Blood");
+    }
+
+    return abnormalities;
+  }
+
+  // ENHANCED: Special handling for blood cases
+  List<String> getCombinedRecommendations() {
+    final hasBlood = widget.bloodDetections['status'] != null &&
+                    widget.bloodDetections['status'] != "none";
+    
+    // Special case: Blood detection is always high priority
+    if (hasBlood) {
+      return _getBloodEmergencyRecommendations();
+    }
+    
+    // Normal combination logic for other cases
+    final recommendations = <String>[];
+    recommendations.addAll(getRecommendationList(widget.classification));
+    
+    if (widget.parasiteDetections['status'] != null &&
+        widget.parasiteDetections['status'] != "none") {
+      recommendations.addAll(getRecommendationList("With Parasite"));
+    }
+    
+    final combinedWording = _combineSimilarWording(recommendations);
+    return _removeDuplicateRecommendations(combinedWording);
+  }
+
+  // SIMPLE & RELIABLE: Manual ordering for blood cases
+  List<String> _getBloodEmergencyRecommendations() {
+    final recommendations = <String>[];
+    
+    // Get all recommendations first
+    final allRecs = <String>[];
+    allRecs.addAll(getRecommendationList(widget.classification));
+    allRecs.addAll(getRecommendationList("With Blood"));
+    
+    // Manual ordering - guaranteed correct sequence
+    recommendations.add("🚨 SEEK IMMEDIATE VETERINARY CARE");
+    
+    // Find and add "Withhold solid food"
+    final withholdFood = allRecs.firstWhere(
+      (rec) => rec.toLowerCase().contains('withhold solid food'),
+      orElse: () => "⚠️ Withhold solid food for 12 to 24 hrs"
+    );
+    recommendations.add(withholdFood);
+    
+    // Find and add "Give clean water"
+    final cleanWater = allRecs.firstWhere(
+      (rec) => rec.toLowerCase().contains('clean water') || rec.toLowerCase().contains('electrolyte'),
+      orElse: () => "Give clean water and homemade electrolyte solution (1 tsp salt + 1 tbsp sugar per liter of water)"
+    );
+    recommendations.add(cleanWater);
+    
+    // Create combined feeding instruction
+    final feedingInstruction = _createBloodFeedingInstruction(allRecs);
+    recommendations.add(feedingInstruction);
+    
+    // Find and add "Avoid fatty foods"
+    final avoidFoods = allRecs.firstWhere(
+      (rec) => rec.toLowerCase().contains('avoid fatty') || rec.toLowerCase().contains('avoid processed'),
+      orElse: () => "Avoid fatty or processed foods"
+    );
+    recommendations.add(avoidFoods);
+    
+    return recommendations;
+  }
+
+  // Helper: Create the combined feeding instruction
+  String _createBloodFeedingInstruction(List<String> allRecs) {
+    final foods = <String>[];
+    
+    // Extract foods from all recommendations
+    for (final rec in allRecs) {
+      if (rec.toLowerCase().contains('rice')) foods.add('rice');
+      if (rec.toLowerCase().contains('boiled chicken')) foods.add('boiled chicken');
+      if (rec.toLowerCase().contains('pumpkin')) foods.add('pumpkin');
+    }
+    
+    final uniqueFoods = foods.toSet().toList();
+    return "Temporarily feed bland meals (${uniqueFoods.join(', ')})";
+  }
+
+  // 2. Enhanced Smart wording combination
+  List<String> _combineSimilarWording(List<String> recommendations) {
+    final combined = <String>[];
+    final feedingInstructions = <String>[];
+    final dietInstructions = <String>[];
+    final otherInstructions = <String>[];
+    
+    // Separate instructions by type
+    for (final recommendation in recommendations) {
+      if (_isFeedingInstruction(recommendation)) {
+        feedingInstructions.add(recommendation);
+      } else if (_isDietInstruction(recommendation)) {
+        dietInstructions.add(recommendation);
+      } else {
+        otherInstructions.add(recommendation);
+      }
+    }
+    
+    // Combine diet instructions FIRST (so they don't get treated as feeding instructions)
+    if (dietInstructions.isNotEmpty) {
+      final combinedDiet = _combineDietInstructions(dietInstructions);
+      combined.addAll(combinedDiet);
+    }
+    
+    // Combine feeding instructions
+    if (feedingInstructions.isNotEmpty) {
+      final combinedFeeding = _combineFeedingInstructions(feedingInstructions);
+      combined.addAll(combinedFeeding);
+    }
+    
+    combined.addAll(otherInstructions);
+    return combined;
+  }
+
+  // SIMPLEST SOLUTION: Use exact phrase checking
+  bool _isFeedingInstruction(String recommendation) {
+    // Only these exact patterns are feeding instructions
+    return recommendation.contains('Feed ') || 
+          recommendation.contains('Temporarily give ') ||
+          recommendation.contains('Include ') ||
+          recommendation.contains('Add ');
+  }
+
+  bool _isDietInstruction(String recommendation) {
+    return recommendation.contains('Maintain a balanced diet') ||
+          recommendation.contains('Continue regular feeding') ||
+          recommendation.contains('Gradually shift to');
+  }
+
+  // 5. Helper: Combine diet instructions
+  List<String> _combineDietInstructions(List<String> dietInstructions) {
+    if (dietInstructions.length == 1) return dietInstructions;
+    
+    // Check for "Maintain a balanced diet" + "Continue regular feeding" combination
+    final hasBalancedDiet = dietInstructions.any((item) => item.toLowerCase().contains('balanced diet'));
+    final hasRegularFeeding = dietInstructions.any((item) => item.toLowerCase().contains('regular feeding'));
+    
+    if (hasBalancedDiet && hasRegularFeeding) {
+      return ["✅ Maintain a balanced diet with regular feeding"];
+    }
+    
+    return dietInstructions;
+  }
+
+  // 6. Helper: Combine feeding instructions
+  List<String> _combineFeedingInstructions(List<String> feedingInstructions) {
+    final foods = <String>[];
+    var isTemporary = false;
+    var isBland = false;
+    var isEasilyDigestible = false;
+    var isHighQuality = false;
+    
+    // Analyze all feeding instructions
+    for (final instruction in feedingInstructions) {
+      final lower = instruction.toLowerCase();
+      
+      if (lower.contains('temporarily')) isTemporary = true;
+      if (lower.contains('bland')) isBland = true;
+      if (lower.contains('easily digestible')) isEasilyDigestible = true;
+      if (lower.contains('high-quality') || lower.contains('natural food')) isHighQuality = true;
+      
+      // Extract food items
+      foods.addAll(_extractFoodItems(instruction));
+    }
+    
+    // Build combined feeding instruction
+    final combined = <String>[];
+    
+    // Only create feeding instruction if we have specific foods or specific diet type
+    if (foods.isNotEmpty || isBland || isEasilyDigestible || isHighQuality) {
+      final prefix = isTemporary ? "Temporarily feed " : "Feed ";
+      var description = "";
+      
+      if (isHighQuality) {
+        description = "high-quality natural meals";
+      } else if (isBland && isEasilyDigestible) {
+        description = "bland, easily digestible meals";
+      } else if (isBland) {
+        description = "bland meals";
+      } else if (isEasilyDigestible) {
+        description = "easily digestible meals";
+      } else {
+        description = "appropriate meals";
+      }
+      
+      final uniqueFoods = foods.toSet().toList();
+      final foodList = uniqueFoods.isNotEmpty ? " (${uniqueFoods.join(', ')})" : "";
+      
+      combined.add('$prefix$description$foodList');
+    }
+    
+    return combined;
+  }
+
+  // 7. Helper: Extract food items
+  List<String> _extractFoodItems(String recommendation) {
+    final foodItems = <String>[];
+    final foods = ['rice', 'boiled chicken', 'pumpkin', 'carrots', 'squash', 
+                  'banana', 'plain yogurt', 'boiled egg', 'sweet potato'];
+    
+    for (final food in foods) {
+      if (recommendation.toLowerCase().contains(food.toLowerCase())) {
+        foodItems.add(food);
+      }
+    }
+    
+    return foodItems;
+  }
+
+  // 8. FIXED duplicate removal - Better keyword detection
+  List<String> _removeDuplicateRecommendations(List<String> recommendations) {
+    final uniqueRecommendations = <String>[];
+    final seenKeywords = <String>{};
+    
+    final sortedRecommendations = _sortByPriority(recommendations);
+    
+    for (final recommendation in sortedRecommendations) {
+      final keyword = _getRecommendationKeyword(recommendation);
+      if (!seenKeywords.contains(keyword)) {
+        seenKeywords.add(keyword);
+        uniqueRecommendations.add(recommendation);
+      }
+    }
+    
+    return uniqueRecommendations;
+  }
+
+  //9. FIXED keyword detection - Better differentiation
+  String _getRecommendationKeyword(String recommendation) {
+    final lower = recommendation.toLowerCase();
+    
+    if (lower.contains('immediate vet') || lower.contains('emergency')) {
+      return 'emergency_vet';
+    } else if (lower.contains('vet advice') || lower.contains('consult vet')) {
+      return 'vet_consultation';
+    } else if (lower.contains('deworm')) {
+      return 'deworming';
+    } else if (lower.contains('withhold food') || lower.contains('withhold solid')) {
+      return 'withhold_food';
+    } else if (lower.contains('electrolyte')) {
+      return 'electrolyte';
+    } else if (lower.contains('clean water') || lower.contains('water intake')) {
+      return 'hydration';
+    } else if (lower.contains('keep clean') || lower.contains('feeding area')) {
+      return 'hygiene'; // SPECIFIC KEYWORD FOR CLEANLINESS
+    } else if (lower.contains('avoid fatty') || lower.contains('avoid processed')) {
+      return 'avoid_foods';
+    } else if (lower.contains('balanced diet') || lower.contains('regular feeding')) {
+      return 'maintain_diet';
+    } else if (lower.contains('gradually shift') || lower.contains('high-quality')) {
+      return 'diet_transition';
+    } else if (lower.contains('sudden food changes') || lower.contains('excessive treats')) {
+      return 'diet_consistency';
+    } else if ((lower.contains('feed') || lower.contains('give') || lower.contains('include')) && 
+              (lower.contains('meals') || lower.contains('diet') || lower.contains('food'))) {
+      return 'specific_feeding';
+    }
+    
+    // Fallback: use first 3 words as keyword to avoid over-deduplication
+    final words = recommendation.split(' ').where((word) => word.isNotEmpty).toList();
+    if (words.length >= 2) {
+      return '${words[0]}_${words[1]}'.toLowerCase();
+    }
+    
+    return recommendation;
+  }
+
+  // 10. Priority sorting
+  List<String> _sortByPriority(List<String> recommendations) {
+    recommendations.sort((a, b) {
+      final int priorityA = _getPriorityLevel(a);
+      final int priorityB = _getPriorityLevel(b);
+      return priorityB.compareTo(priorityA);
+    });
+    return recommendations;
+  }
+
+  // 11. Priority level
+  int _getPriorityLevel(String recommendation) {
+    if (recommendation.contains('immediate vet') || recommendation.contains('emergency')) {
+      return 3;
+    } else if (recommendation.contains('vet advice') || recommendation.contains('Withhold food')) {
+      return 2;
+    } else if (recommendation.contains('⚠️') || recommendation.contains('Consult vet')) {
+      return 1;
+    }
+    return 0;
+  }
+
+  // 12. Your original recommendation lists (WITH EMOJIS)
+  List<String> getRecommendationList(String type) {
+    switch (type) {
       case "Dry":
-        return "💧 Ensure adequate water intake; add wet food or fiber-rich diet (boiled squash, banana, or plain yogurt).";
+        return [
+          "💧 Ensure adequate water intake",
+          "Add wet food or fiber-rich diet (boiled squash, banana, or plain yogurt)"
+        ];
       case "Normal":
-        return "✅ Maintain a balanced diet; continue regular feeding. Include rice, boiled chicken, and vegetables like carrots or pumpkin.";
+        return [
+          "✅ Maintain a balanced diet",
+          "Continue regular feeding",
+          "Include rice, boiled chicken, and vegetables like carrots or pumpkin"
+        ];
       case "Soft":
-        return "🥣 Gradually shift to high-quality natural food (boiled egg, pumpkin, or rice). Avoid sudden food changes or excessive treats.";
-      case "Loose":
-        return "⚠️ Withhold solid food for 12 to 24 hrs; give clean water and homemade electrolyte solution (1 tsp salt + 1 tbsp sugar per liter of water). Feed bland diet afterward (boiled chicken and rice). Consult vet if persists.";
+        return [
+          "🥣 Gradually shift to high-quality natural food (boiled egg, pumpkin, or rice)",
+          "Avoid sudden food changes or excessive treats"
+        ];
+      case "Watery":
+        return [
+          "⚠️ Withhold solid food for 12 to 24 hrs",
+          "Give clean water and homemade electrolyte solution (1 tsp salt + 1 tbsp sugar per liter of water)",
+          "Feed bland diet afterward (boiled chicken and rice)",
+          "Consult vet if persists"
+        ];
       case "With Parasite":
-        return "⚠️ Deworm as prescribed by a vet. Feed easily digestible, natural meals (boiled sweet potato, squash, or egg). Keep the feeding area clean.";
+        return [
+          "⚠️ Deworm as prescribed by a vet",
+          "Feed easily digestible, natural meals (boiled sweet potato, squash, or egg)",
+          "Keep the feeding area clean"
+        ];
       case "With Blood":
-        return "⚠️ Seek immediate vet advice. Temporarily give soft, bland meals (rice, pumpkin, boiled chicken). Avoid fatty or processed foods.";
+        return [
+          "⚠️ Seek immediate vet advice",
+          "Temporarily give soft, bland meals (rice, pumpkin, boiled chicken)",
+          "Avoid fatty or processed foods"
+        ];
       default:
-        return "ℹ️ No specific recommendation available.";
+        return ["ℹ️ No specific recommendation available"];
     }
   }
 
@@ -532,7 +1061,7 @@ class _ResultScreenState extends State<ResultScreen>
         return Colors.green.shade700;
       case "Soft":
         return Colors.amber.shade800;
-      case "Loose":
+      case "Watery":
         return Colors.red.shade700;
       default:
         return Colors.grey.shade300;
@@ -542,7 +1071,11 @@ class _ResultScreenState extends State<ResultScreen>
   @override
   Widget build(BuildContext context) {
     final confidencePercent = (widget.confidence * 100).toStringAsFixed(2);
-
+    final pconfidencePercent = (widget.parasiteDetections['confidence'] * 100).toStringAsFixed(2);
+    final bconfidencePercent = (widget.bloodDetections['confidence'] * 100).toStringAsFixed(2);
+    final abnormalityList = getAbnormalityList();
+    final combinedRecommendations = getCombinedRecommendations(); // NEW
+    
     return Scaffold(
       backgroundColor: const Color(0xFF3B2A20),
       appBar: AppBar(
@@ -629,7 +1162,74 @@ class _ResultScreenState extends State<ResultScreen>
             ),
             const SizedBox(height: 20),
 
-            /// 📝 Recommendation Card
+            /// 🩺 Additional Findings Display (Simpler Version)
+            if (abnormalityList.isNotEmpty) ...[
+              Card(
+                color: Colors.orange.shade50,
+                elevation: 3,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  side: BorderSide(color: Colors.orange.shade200, width: 1),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.warning, color: Colors.orange.shade700, size: 30),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              "Additional Findings:",
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.orange.shade800,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            // Parasite finding
+                            if (widget.parasiteDetections['status'] != null &&
+                                widget.parasiteDetections['status'] != "none")
+                              Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 2.0),
+                                child: Text(
+                                  "• Parasite (${pconfidencePercent}% confidence)",
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    color: Colors.orange.shade700,
+                                    height: 1.4,
+                                  ),
+                                ),
+                              ),
+                            // Blood finding
+                            if (widget.bloodDetections['status'] != null &&
+                                widget.bloodDetections['status'] != "none")
+                              Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 2.0),
+                                child: Text(
+                                  "• Blood (${bconfidencePercent}% confidence)",
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    color: Colors.orange.shade700,
+                                    height: 1.4,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+
+            /// 📝 Combined Recommendation Card (UPDATED)
             Card(
               color: Colors.white,
               elevation: 3,
@@ -637,23 +1237,62 @@ class _ResultScreenState extends State<ResultScreen>
                   borderRadius: BorderRadius.circular(16)),
               child: Padding(
                 padding: const EdgeInsets.all(16),
-                child: Row(
+                child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.pets, color: Colors.brown, size: 30),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        getRecommendation(),
-                        style: const TextStyle(fontSize: 16,color: Colors.brown, height: 1.4),
-                      ),
+                    // Title row with icon
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.pets, color: Colors.brown, size: 30),
+                        const SizedBox(width: 12),
+                        const Text(
+                          "Dietary Recommendations",
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.brown,
+                          ),
+                        ),
+                      ],
                     ),
+                    const SizedBox(height: 12),
+                    // Recommendations list - full width, no icon influence
+                    ...combinedRecommendations.map((item) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4.0),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // Bullet point
+                            Text(
+                              "• ",
+                              style: const TextStyle(
+                                fontSize: 16,
+                                color: Colors.brown,
+                                height: 1.4,
+                              ),
+                            ),
+                            // Recommendation text
+                            Expanded(
+                              child: Text(
+                                item,
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  color: Colors.brown,
+                                  height: 1.4,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }).toList(),
                   ],
                 ),
               ),
             ),
             const SizedBox(height: 20),
-
             /// 🔁 Scan Again Button
             ElevatedButton.icon(
               style: ElevatedButton.styleFrom(

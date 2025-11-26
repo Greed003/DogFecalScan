@@ -94,7 +94,7 @@ class _ContactVetScreenState extends State<ContactVetScreen> {
     _showSnackBar("📋 Phone number $phone copied");
   }
 
-  /// 💬 Send SMS with last scan details
+  /// 💬 Send SMS with last scan details including additional findings
   void _smsVet(String phone, String clinicName) async {
     if (lastScan == null) {
       _showSnackBar("No recent scan found to send.");
@@ -104,13 +104,20 @@ class _ContactVetScreenState extends State<ContactVetScreen> {
     final status = lastScan!["status"] ?? "Unknown";
     final confidence = lastScan!["confidence"]?.toString() ?? "N/A";
     final date = lastScan!["date"] ?? DateFormat('MMM d, yyyy').format(DateTime.now());
+    
+    // Get additional findings
+    final parasiteStatus = lastScan!["parasite"];
+    final parasiteConfidence = lastScan!["parasiteConfidence"];
+    final bloodStatus = lastScan!["blood"];
+    final bloodConfidence = lastScan!["bloodConfidence"];
+
+    // Build the stool description
+    String stoolDescription = _buildStoolDescription(status, parasiteStatus, bloodStatus);
 
     final message =
-        "Hello Dr. $clinicName,\n\n"
-        "Here is my dog latest fecal scan result:\n"
-        "Classification: $status\n"
-        "Confidence: $confidence%\n"
         "Date: $date\n\n"
+        "Hello Dr. $clinicName,\n\n"
+        "$stoolDescription\n\n"
         "Could you please advise me on what to do next?\n\n"
         "Thank you!";
 
@@ -123,6 +130,26 @@ class _ContactVetScreenState extends State<ContactVetScreen> {
     if (!await launchUrl(smsUri, mode: LaunchMode.externalApplication)) {
       _showSnackBar("Your device's SMS app cannot handle messages from apps.");
     }
+  }
+
+  /// 🔹 Build stool description based on classification and additional findings
+  String _buildStoolDescription(String status, dynamic parasiteStatus, dynamic bloodStatus) {
+    final hasParasite = parasiteStatus != null && parasiteStatus != "none";
+    final hasBlood = bloodStatus != null && bloodStatus != "none";
+    
+    String description = "My dog's stool is $status";
+    
+    if (hasParasite && hasBlood) {
+      description += " with possible Parasite and Blood";
+    } else if (hasParasite) {
+      description += " with possible Parasite";
+    } else if (hasBlood) {
+      description += " with possible Blood";
+    }
+    
+    description += ".";
+    
+    return description;
   }
 
   void _showSnackBar(String message) {
