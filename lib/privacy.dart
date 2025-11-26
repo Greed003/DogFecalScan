@@ -36,58 +36,63 @@ class PrivacyPolicyScreen extends StatelessWidget {
             children: [
               sectionTitle("Privacy Policy for DogFecalScan"),
               sectionText(
-                  "At DogFecalScan, one of our main priorities is the privacy of our users. "
-                  "This Privacy Policy explains how we handle information, both online and offline, "
-                  "and how we protect your privacy while you use the app."),
+                "At DogFecalScan, one of our main priorities is the privacy of our users. "
+                "This Privacy Policy explains how we handle information and how we protect your privacy while you use the app."
+              ),
 
               sectionTitle("Consent"),
               sectionText(
-                  "By using DogFecalScan, you hereby consent to this Privacy Policy and agree to its terms."),
+                "By using DogFecalScan, you hereby consent to this Privacy Policy and agree to its terms."
+              ),
 
-              sectionTitle("Information We Collect"),
+              sectionTitle("Information We Process"),
               sectionText(
-                  "DogFecalScan does not require you to create an account or provide personal data. "
-                  "The only data we process are the images you capture or upload for classification, "
-                  "and these remain on your device."),
-              bullet("Captured or uploaded stool images – processed locally on your device."),
-              bullet("Timestamps – saved locally if you choose to view your history."),
-              bullet("Contact info – only used if you tap 'Contact Vet' or 'Send Feedback'."),
+                "DogFecalScan does not require you to create an account or provide personal data. "
+                "The app processes images locally on your device for analysis purposes only."
+              ),
+              bullet("Stool images – processed locally on your device and not stored by the app"),
+              bullet("Timestamps – saved locally only if you choose to use the history feature"),
+              bullet("Contact info – only used if you choose to contact a vet or send feedback"),
 
               sectionTitle("How We Use Your Information"),
-              bullet("Analyze dog stool images locally using AI to classify health conditions."),
-              bullet("Save your scan history on your device (optional)."),
-              bullet("Improve app functionality through feedback."),
+              bullet("Analyze dog stool images locally using AI to provide dietary suggestions"),
+              bullet("Save your scan history locally on your device (optional feature)"),
+              bullet("Improve app functionality through user feedback (if provided)"),
 
-              sectionTitle("Offline Use"),
+              sectionTitle("Offline Operation"),
               sectionText(
-                  "DogFecalScan works completely offline. All image processing happens locally. "
-                  "No data is sent to external servers, and we do not track or monitor user activity."),
+                "DogFecalScan works completely offline. All image processing happens locally on your device. "
+                "No data is sent to external servers, and we do not track, monitor, or collect user activity."
+              ),
 
-              sectionTitle("Log Files & Analytics"),
+              sectionTitle("Data Storage & Security"),
               sectionText(
-                  "Unlike websites, this app does not use cookies or online tracking. "
-                  "We do not collect IP addresses, device identifiers, or analytics data."),
+                "All data remains on your device. We do not use cookies, online tracking, or collect any analytics data. "
+                "Your privacy is protected by the app's offline design."
+              ),
 
-              sectionTitle("Third-Party Privacy"),
+              sectionTitle("Third-Party Services"),
               sectionText(
-                  "This app does not share your data with third-party advertisers or services. "
-                  "Links to external resources (like a vet clinic's phone number or location) "
-                  "will open outside the app and are subject to their own privacy policies."),
+                "This app does not share your data with third-party advertisers or services. "
+                "External features like contacting a vet will open outside the app and are subject to their own privacy policies."
+              ),
 
               sectionTitle("Your Rights"),
-              bullet("Right to Access – You can view all your stored history from the History screen."),
-              bullet("Right to Erasure – You can clear all stored data by using 'Clear History' in the app."),
-              bullet("Right to Withdraw Consent – You can uninstall the app anytime."),
+              bullet("Right to Access – You can view all stored data from the History screen"),
+              bullet("Right to Delete – You can clear all stored data using 'Clear History' in the app"),
+              bullet("Right to Withdraw – You can uninstall the app at any time to remove all local data"),
 
-              sectionTitle("Children’s Privacy"),
+              sectionTitle("Children's Privacy"),
               sectionText(
-                  "DogFecalScan does not knowingly collect any personal information from children under 13. "
-                  "Parents and guardians are encouraged to monitor their children's use of the app."),
+                "DogFecalScan does not knowingly collect any personal information from children under 13. "
+                "The app is designed for pet owners and guardians."
+              ),
 
-              sectionTitle("Updates to This Policy"),
+              sectionTitle("Policy Updates"),
               sectionText(
-                  "We may update this Privacy Policy from time to time. Any changes will be reflected here, "
-                  "and the 'Last Updated' date will be adjusted accordingly."),
+                "We may update this Privacy Policy from time to time. Any changes will be reflected here, "
+                "and we encourage you to review this policy periodically."
+              ),
 
               sectionTitle("Contact Us"),
               sectionText("If you have any questions about this Privacy Policy, you can contact us at:"),
@@ -104,7 +109,7 @@ class PrivacyPolicyScreen extends StatelessWidget {
               ),
               const SizedBox(height: 20),
               const Text(
-                "Last Updated: September 2025",
+                "Last Updated: November 2025", // Changed to current year
                 style: TextStyle(color: Colors.white54, fontSize: 13, fontStyle: FontStyle.italic),
               ),
             ],
