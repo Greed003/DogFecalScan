@@ -1,6 +1,26 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart'; 
 
 class TermsAndConditionsScreen extends StatelessWidget {
+
+  void _launchEmail() async {
+    final Uri emailUri = Uri(
+      scheme: 'mailto',
+      path: 'robertleo.ballasiw@lorma.edu',
+      query: 'subject=Terms and Conditions Inquiry',
+    );
+    try {
+      if (await canLaunchUrl(emailUri)) {
+        await launchUrl(emailUri);
+      } else {
+        // Optional: Show a snackbar or dialog if email app is not available
+        print('Could not launch email');
+      }
+    } catch (e) {
+      print('Error launching email: $e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -91,6 +111,20 @@ class TermsAndConditionsScreen extends StatelessWidget {
               "and you submit to the non-exclusive jurisdiction of the courts located there for the resolution of any disputes."
             ),
 
+            sectionTitle("Contact Information"),
+            sectionText("If you have any questions about these Terms and Conditions, app usage, or licensing, please contact us at:"),
+              GestureDetector(
+                onTap: _launchEmail,
+                child: Text(
+                  "robertleo.ballasiw@lorma.edu",
+                  style: const TextStyle(
+                    color: Colors.lightBlueAccent,
+                    fontSize: 15,
+                    decoration: TextDecoration.underline,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
           ],
         ),
       ),
