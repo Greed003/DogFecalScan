@@ -125,6 +125,10 @@ class TermsAndConditionsScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 20),
+              const Text(
+              "Last Updated: November 2025",
+              style: TextStyle(color: Colors.white54, fontSize: 13, fontStyle: FontStyle.italic),
+            ),
           ],
         ),
       ),
