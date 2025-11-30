@@ -13,69 +13,18 @@ class ContactVetScreen extends StatefulWidget {
 }
 
 class _ContactVetScreenState extends State<ContactVetScreen> {
-  Map<String, dynamic>? lastScan;
-
   final List<Map<String, String>> vets = [
     {
-      "city": "Bacnotan",
-      "clinic": "NeerVet Animal Clinic",
-      "address": "Leoncia Bldg., 118 Poblacion, Bacnotan, La Union",
-      "phone": "09564926029"
-    },
-    {
-      "city": "Bangar",
-      "clinic": "Gentle Paws Animal Clinic",
-      "address": "San Blas, Bangar, La Union",
-      "phone": "09610127966"
-    },
-    {
-      "city": "Santo Tomas",
-      "clinic": "Paw-Protect Veterinary Clinic",
-      "address": "Lomboy, Santo Tomas, La Union",
-      "phone": "09177024726"
-    },
-    {
-      "city": "Agoo",
-      "clinic": "AGOO ANIMAL CLINIC AND GROOMING CENTER",
-      "address": "002 San Vicente Sur, Agoo, 2504 La Union",
-      "phone": "09693864631"
-    },
-    {
-      "city": "Bauang",
-      "clinic": "Bauang Vet Care Clinic",
-      "address": "Villa Marand, Baccuit Sur, Bauang, La Union",
-      "phone": "09357168082"
-    },
-    {
-      "city": "San Fernando",
-      "clinic": "Valley Vets Animal Clinic",
-      "address": "Real Bldg., Lingsat, City of San Fernando, La Union",
-      "phone": "09069620694"
-    },
-    {
       "city": "San Juan",
-      "clinic": "Elyu Veterinary Care Clinic",
-      "address": "Agripina Complex, Ili Norte, San Juan, La Union",
-      "phone": "09568563904"
+      "clinic": "Animaland Veterinary Clinic and Diagnostic Center",
+      "address": "Urbiztondo, San Juan, La Union",
+      "phone": "09175002313"
     },
   ];
 
   @override
   void initState() {
     super.initState();
-    _loadLastScan();
-  }
-
-  /// 🔹 Get the most recent history record
-  Future<void> _loadLastScan() async {
-    final prefs = await SharedPreferences.getInstance();
-    final history = prefs.getStringList("history") ?? [];
-    if (history.isNotEmpty) {
-      final decoded = history.map((e) => jsonDecode(e) as Map<String, dynamic>).toList();
-      setState(() {
-        lastScan = decoded.last; // last (newest)
-      });
-    }
   }
 
   /// 📞 Tap to call
@@ -94,27 +43,156 @@ class _ContactVetScreenState extends State<ContactVetScreen> {
     _showSnackBar("📋 Phone number $phone copied");
   }
 
-  /// 💬 Send SMS with last scan details including additional findings
-  void _smsVet(String phone, String clinicName) async {
-    if (lastScan == null) {
-      _showSnackBar("No recent scan found to send.");
-      return;
+  /// 💬 Handle SMS - ALWAYS check SharedPreferences directly (no memory variable)
+  void _handleSmsVet(String phone, String clinicName) async {
+    // Always check SharedPreferences directly to get the latest data
+    final prefs = await SharedPreferences.getInstance();
+    final history = prefs.getStringList("history") ?? [];
+    
+    if (history.isEmpty) {
+      // No history - open SMS directly with no message
+      _openSMS(phone);
+    } else {
+      // Has history - get the latest scan and ask user
+      final decoded = history.map((e) => jsonDecode(e) as Map<String, dynamic>).toList();
+      final currentLastScan = decoded.last;
+      _showSmsOptionDialog(phone, clinicName, currentLastScan);
     }
+  }
 
-    final status = lastScan!["status"] ?? "Unknown";
-    final confidence = lastScan!["confidence"]?.toString() ?? "N/A";
-    final date = lastScan!["date"] ?? DateFormat('MMM d, yyyy').format(DateTime.now());
+  /// 🗨️ Show dialog to choose SMS option with better UI
+  void _showSmsOptionDialog(String phone, String clinicName, Map<String, dynamic> currentScan) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return Dialog(
+          backgroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Stack(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Icon
+                    Icon(
+                      Icons.medical_services,
+                      size: 48,
+                      color: Colors.brown[700],
+                    ),
+                    const SizedBox(height: 16),
+                    
+                    // Title
+                    Text(
+                      "Include Scan Results?",
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.brown[800],
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 12),
+                    
+                    // Description
+                    Text(
+                      "Would you like to include your latest stool scan results in the message to the vet?",
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: Colors.grey[700],
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 24),
+                    
+                    // Buttons
+                    Row(
+                      children: [
+                        // No button
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () {
+                              Navigator.pop(context);
+                              _openSMS(phone); // Open with no message
+                            },
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.brown[700],
+                              side: BorderSide(color: Colors.brown[700]!),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            child: const Text(
+                              "Just Message",
+                              style: TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        
+                        // Yes button
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: () {
+                              Navigator.pop(context);
+                              _sendSMSWithScan(phone, clinicName, currentScan);
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.brown[700],
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            child: const Text(
+                              "Include Results",
+                              style: TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              
+              // Close (X) button
+              Positioned(
+                top: 8,
+                right: 8,
+                child: IconButton(
+                  icon: const Icon(Icons.close, size: 24),
+                  color: Colors.grey[600],
+                  onPressed: () {
+                    Navigator.pop(context);
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// 💬 Send SMS with specific scan data
+  void _sendSMSWithScan(String phone, String clinicName, Map<String, dynamic> scanData) async {
+    final status = scanData["status"] ?? "Unknown";
+    final date = scanData["date"] ?? DateFormat('MMM d, yyyy').format(DateTime.now());
     
     // Get additional findings
-    final parasiteStatus = lastScan!["parasite"];
-    final parasiteConfidence = lastScan!["parasiteConfidence"];
-    final bloodStatus = lastScan!["blood"];
-    final bloodConfidence = lastScan!["bloodConfidence"];
+    final parasiteStatus = scanData["parasite"];
+    final bloodStatus = scanData["blood"];
 
     // Build the stool description
     String stoolDescription = _buildStoolDescription(status, parasiteStatus, bloodStatus);
 
-    final message =
+    String message =
         "Date: $date\n\n"
         "Hello Dr. $clinicName,\n\n"
         "$stoolDescription\n\n"
@@ -127,6 +205,20 @@ class _ContactVetScreenState extends State<ContactVetScreen> {
       queryParameters: {'body': message},
     );
 
+    if (!await launchUrl(smsUri, mode: LaunchMode.externalApplication)) {
+      _showSnackBar("Your device's SMS app cannot handle messages from apps.");
+    }
+  }
+
+  /// 💬 Open SMS with no pre-filled message
+  void _openSMS(String phone) async {
+    String message = "";
+    final smsUri = Uri(
+      scheme: 'sms',
+      path: phone,
+      queryParameters: {'body': message},
+    );
+  
     if (!await launchUrl(smsUri, mode: LaunchMode.externalApplication)) {
       _showSnackBar("Your device's SMS app cannot handle messages from apps.");
     }
@@ -210,11 +302,8 @@ class _ContactVetScreenState extends State<ContactVetScreen> {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: ListTile(
-                    // Removed onTap — now user taps only the call button
                     onLongPress: () => _copyPhone(vet["phone"]!),
-
                     contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-
                     title: Text(
                       vet["clinic"]!,
                       style: const TextStyle(
@@ -223,7 +312,6 @@ class _ContactVetScreenState extends State<ContactVetScreen> {
                         fontSize: 16,
                       ),
                     ),
-
                     subtitle: Padding(
                       padding: const EdgeInsets.only(top: 4.0),
                       child: Text(
@@ -234,23 +322,21 @@ class _ContactVetScreenState extends State<ContactVetScreen> {
                         ),
                       ),
                     ),
-
                     trailing: Wrap(
                       spacing: 10,
                       children: [
-                        // ------------- SMS BUTTON (same style as call) -------------
+                        // ------------- SMS BUTTON -------------
                         GestureDetector(
-                          onTap: () => _smsVet(vet["phone"]!, vet["clinic"]!),
+                          onTap: () => _handleSmsVet(vet["phone"]!, vet["clinic"]!),
                           child: Container(
                             decoration: BoxDecoration(
-                              color: Colors.blue.shade700,   // SMS color (feel free to change)
+                              color: Colors.blue.shade700,
                               borderRadius: BorderRadius.circular(50),
                             ),
                             padding: const EdgeInsets.all(8),
                             child: const Icon(Icons.sms, color: Colors.white),
                           ),
                         ),
-
                         // ------------- CALL BUTTON -------------
                         GestureDetector(
                           onTap: () => _callVet(vet["phone"]!),

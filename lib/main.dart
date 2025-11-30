@@ -881,27 +881,59 @@ class _ResultScreenState extends State<ResultScreen>
     return abnormalities;
   }
 
-  // ENHANCED: Special handling for blood cases
+  // SIMPLIFIED: Only combine when needed, otherwise return original
   List<String> getCombinedRecommendations() {
     final hasBlood = widget.bloodDetections['status'] != null &&
                     widget.bloodDetections['status'] != "none";
+    final hasParasite = widget.parasiteDetections['status'] != null &&
+                      widget.parasiteDetections['status'] != "none";
     
     // Special case: Blood detection is always high priority
     if (hasBlood) {
       return _getBloodEmergencyRecommendations();
     }
     
-    // Normal combination logic for other cases
-    final recommendations = <String>[];
-    recommendations.addAll(getRecommendationList(widget.classification));
-    
-    if (widget.parasiteDetections['status'] != null &&
-        widget.parasiteDetections['status'] != "none") {
-      recommendations.addAll(getRecommendationList("With Parasite"));
+    // Special case: Parasite detection - combine and remove duplicates
+    if (hasParasite) {
+      return _getParasiteCombinedRecommendations();
     }
     
-    final combinedWording = _combineSimilarWording(recommendations);
-    return _removeDuplicateRecommendations(combinedWording);
+    // If no additional findings, just return the primary classification recommendations
+    return getRecommendationList(widget.classification);
+  }
+
+  // SIMPLEST: Manual combination for parasite cases
+  List<String> _getParasiteCombinedRecommendations() {
+    final recommendations = <String>[];
+    
+    // Always start with deworming
+    recommendations.add("⚠️ Regular deworming required");
+    
+    // Add primary classification recommendations (filter out individual food instructions)
+    final primaryRecs = getRecommendationList(widget.classification);
+    for (final rec in primaryRecs) {
+      if (!rec.toLowerCase().contains('include') && 
+          !rec.toLowerCase().contains('add') && 
+          !rec.toLowerCase().contains('feed') && 
+          !rec.toLowerCase().contains('give')) {
+        recommendations.add(rec);
+      }
+    }
+    
+    // Always add hygiene
+    recommendations.add("Keep the feeding area clean");
+    
+    // Add combined foods from both primary and parasite recommendations
+    final allFoods = _extractAllFoods([
+      ...getRecommendationList(widget.classification),
+      ...getRecommendationList("With Parasite")
+    ]);
+    
+    if (allFoods.isNotEmpty) {
+      recommendations.add("Feed easily digestible meals (${allFoods.join(', ')})");
+    }
+    
+    return recommendations;
   }
 
   // SIMPLE & RELIABLE: Manual ordering for blood cases
@@ -930,9 +962,12 @@ class _ResultScreenState extends State<ResultScreen>
     );
     recommendations.add(cleanWater);
     
-    // Create combined feeding instruction
-    final feedingInstruction = _createBloodFeedingInstruction(allRecs);
-    recommendations.add(feedingInstruction);
+    // Extract all foods and create combined feeding instruction
+    final allFoods = _extractAllFoods(allRecs);
+    if (allFoods.isNotEmpty) {
+      final feedingInstruction = _createBloodFeedingInstruction(allFoods);
+      recommendations.add(feedingInstruction);
+    }
     
     // Find and add "Avoid fatty foods"
     final avoidFoods = allRecs.firstWhere(
@@ -944,231 +979,41 @@ class _ResultScreenState extends State<ResultScreen>
     return recommendations;
   }
 
-  // Helper: Create the combined feeding instruction
-  String _createBloodFeedingInstruction(List<String> allRecs) {
+  // Helper: Extract all food items from recommendations
+  List<String> _extractAllFoods(List<String> recommendations) {
     final foods = <String>[];
+    final foodItems = ['rice', 'boiled chicken', 'pumpkin', 'carrots', 'squash', 
+                      'banana', 'plain yogurt', 'boiled egg', 'sweet potato'];
     
-    // Extract foods from all recommendations
-    for (final rec in allRecs) {
-      if (rec.toLowerCase().contains('rice')) foods.add('rice');
-      if (rec.toLowerCase().contains('boiled chicken')) foods.add('boiled chicken');
-      if (rec.toLowerCase().contains('pumpkin')) foods.add('pumpkin');
-    }
-    
-    final uniqueFoods = foods.toSet().toList();
-    return "Temporarily feed bland meals (${uniqueFoods.join(', ')})";
-  }
-
-  // 2. Enhanced Smart wording combination
-  List<String> _combineSimilarWording(List<String> recommendations) {
-    final combined = <String>[];
-    final feedingInstructions = <String>[];
-    final dietInstructions = <String>[];
-    final otherInstructions = <String>[];
-    
-    // Separate instructions by type
-    for (final recommendation in recommendations) {
-      if (_isFeedingInstruction(recommendation)) {
-        feedingInstructions.add(recommendation);
-      } else if (_isDietInstruction(recommendation)) {
-        dietInstructions.add(recommendation);
-      } else {
-        otherInstructions.add(recommendation);
+    for (final rec in recommendations) {
+      for (final food in foodItems) {
+        if (rec.toLowerCase().contains(food.toLowerCase())) {
+          foods.add(food);
+        }
       }
     }
     
-    // Combine diet instructions FIRST (so they don't get treated as feeding instructions)
-    if (dietInstructions.isNotEmpty) {
-      final combinedDiet = _combineDietInstructions(dietInstructions);
-      combined.addAll(combinedDiet);
-    }
-    
-    // Combine feeding instructions
-    if (feedingInstructions.isNotEmpty) {
-      final combinedFeeding = _combineFeedingInstructions(feedingInstructions);
-      combined.addAll(combinedFeeding);
-    }
-    
-    combined.addAll(otherInstructions);
-    return combined;
+    return foods.toSet().toList(); // Return unique foods
   }
 
-  // SIMPLEST SOLUTION: Use exact phrase checking
-  bool _isFeedingInstruction(String recommendation) {
-    // Only these exact patterns are feeding instructions
-    return recommendation.contains('Feed ') || 
-          recommendation.contains('Temporarily give ') ||
-          recommendation.contains('Include ') ||
-          recommendation.contains('Add ');
+  // Helper: Create combined feeding instruction for blood cases
+  String _createBloodFeedingInstruction(List<String> foods) {
+    // Group foods by category for better organization
+    final proteins = foods.where((food) => food.contains('chicken') || food.contains('egg')).toList();
+    final carbs = foods.where((food) => food.contains('rice') || food.contains('sweet potato')).toList();
+    final vegetables = foods.where((food) => food.contains('pumpkin') || food.contains('carrots') || food.contains('squash')).toList();
+    final others = foods.where((food) => food.contains('banana') || food.contains('yogurt')).toList();
+    
+    final List<String> organizedFoods = [];
+    if (carbs.isNotEmpty) organizedFoods.addAll(carbs);
+    if (proteins.isNotEmpty) organizedFoods.addAll(proteins);
+    if (vegetables.isNotEmpty) organizedFoods.addAll(vegetables);
+    if (others.isNotEmpty) organizedFoods.addAll(others);
+    
+    return "Temporarily feed bland meals (${organizedFoods.join(', ')})";
   }
 
-  bool _isDietInstruction(String recommendation) {
-    return recommendation.contains('Maintain a balanced diet') ||
-          recommendation.contains('Continue regular feeding') ||
-          recommendation.contains('Gradually shift to');
-  }
-
-  // 5. Helper: Combine diet instructions
-  List<String> _combineDietInstructions(List<String> dietInstructions) {
-    if (dietInstructions.length == 1) return dietInstructions;
-    
-    // Check for "Maintain a balanced diet" + "Continue regular feeding" combination
-    final hasBalancedDiet = dietInstructions.any((item) => item.toLowerCase().contains('balanced diet'));
-    final hasRegularFeeding = dietInstructions.any((item) => item.toLowerCase().contains('regular feeding'));
-    
-    if (hasBalancedDiet && hasRegularFeeding) {
-      return ["✅ Maintain a balanced diet with regular feeding"];
-    }
-    
-    return dietInstructions;
-  }
-
-  // 6. Helper: Combine feeding instructions
-  List<String> _combineFeedingInstructions(List<String> feedingInstructions) {
-    final foods = <String>[];
-    var isTemporary = false;
-    var isBland = false;
-    var isEasilyDigestible = false;
-    var isHighQuality = false;
-    
-    // Analyze all feeding instructions
-    for (final instruction in feedingInstructions) {
-      final lower = instruction.toLowerCase();
-      
-      if (lower.contains('temporarily')) isTemporary = true;
-      if (lower.contains('bland')) isBland = true;
-      if (lower.contains('easily digestible')) isEasilyDigestible = true;
-      if (lower.contains('high-quality') || lower.contains('natural food')) isHighQuality = true;
-      
-      // Extract food items
-      foods.addAll(_extractFoodItems(instruction));
-    }
-    
-    // Build combined feeding instruction
-    final combined = <String>[];
-    
-    // Only create feeding instruction if we have specific foods or specific diet type
-    if (foods.isNotEmpty || isBland || isEasilyDigestible || isHighQuality) {
-      final prefix = isTemporary ? "Temporarily feed " : "Feed ";
-      var description = "";
-      
-      if (isHighQuality) {
-        description = "high-quality natural meals";
-      } else if (isBland && isEasilyDigestible) {
-        description = "bland, easily digestible meals";
-      } else if (isBland) {
-        description = "bland meals";
-      } else if (isEasilyDigestible) {
-        description = "easily digestible meals";
-      } else {
-        description = "appropriate meals";
-      }
-      
-      final uniqueFoods = foods.toSet().toList();
-      final foodList = uniqueFoods.isNotEmpty ? " (${uniqueFoods.join(', ')})" : "";
-      
-      combined.add('$prefix$description$foodList');
-    }
-    
-    return combined;
-  }
-
-  // 7. Helper: Extract food items
-  List<String> _extractFoodItems(String recommendation) {
-    final foodItems = <String>[];
-    final foods = ['rice', 'boiled chicken', 'pumpkin', 'carrots', 'squash', 
-                  'banana', 'plain yogurt', 'boiled egg', 'sweet potato'];
-    
-    for (final food in foods) {
-      if (recommendation.toLowerCase().contains(food.toLowerCase())) {
-        foodItems.add(food);
-      }
-    }
-    
-    return foodItems;
-  }
-
-  // 8. FIXED duplicate removal - Better keyword detection
-  List<String> _removeDuplicateRecommendations(List<String> recommendations) {
-    final uniqueRecommendations = <String>[];
-    final seenKeywords = <String>{};
-    
-    final sortedRecommendations = _sortByPriority(recommendations);
-    
-    for (final recommendation in sortedRecommendations) {
-      final keyword = _getRecommendationKeyword(recommendation);
-      if (!seenKeywords.contains(keyword)) {
-        seenKeywords.add(keyword);
-        uniqueRecommendations.add(recommendation);
-      }
-    }
-    
-    return uniqueRecommendations;
-  }
-
-  //9. FIXED keyword detection - Better differentiation
-  String _getRecommendationKeyword(String recommendation) {
-    final lower = recommendation.toLowerCase();
-    
-    if (lower.contains('immediate vet') || lower.contains('emergency')) {
-      return 'emergency_vet';
-    } else if (lower.contains('vet advice') || lower.contains('consult vet')) {
-      return 'vet_consultation';
-    } else if (lower.contains('deworm')) {
-      return 'deworming';
-    } else if (lower.contains('withhold food') || lower.contains('withhold solid')) {
-      return 'withhold_food';
-    } else if (lower.contains('electrolyte')) {
-      return 'electrolyte';
-    } else if (lower.contains('clean water') || lower.contains('water intake')) {
-      return 'hydration';
-    } else if (lower.contains('keep clean') || lower.contains('feeding area')) {
-      return 'hygiene'; // SPECIFIC KEYWORD FOR CLEANLINESS
-    } else if (lower.contains('avoid fatty') || lower.contains('avoid processed')) {
-      return 'avoid_foods';
-    } else if (lower.contains('balanced diet') || lower.contains('regular feeding')) {
-      return 'maintain_diet';
-    } else if (lower.contains('gradually shift') || lower.contains('high-quality')) {
-      return 'diet_transition';
-    } else if (lower.contains('sudden food changes') || lower.contains('excessive treats')) {
-      return 'diet_consistency';
-    } else if ((lower.contains('feed') || lower.contains('give') || lower.contains('include')) && 
-              (lower.contains('meals') || lower.contains('diet') || lower.contains('food'))) {
-      return 'specific_feeding';
-    }
-    
-    // Fallback: use first 3 words as keyword to avoid over-deduplication
-    final words = recommendation.split(' ').where((word) => word.isNotEmpty).toList();
-    if (words.length >= 2) {
-      return '${words[0]}_${words[1]}'.toLowerCase();
-    }
-    
-    return recommendation;
-  }
-
-  // 10. Priority sorting
-  List<String> _sortByPriority(List<String> recommendations) {
-    recommendations.sort((a, b) {
-      final int priorityA = _getPriorityLevel(a);
-      final int priorityB = _getPriorityLevel(b);
-      return priorityB.compareTo(priorityA);
-    });
-    return recommendations;
-  }
-
-  // 11. Priority level
-  int _getPriorityLevel(String recommendation) {
-    if (recommendation.contains('immediate vet') || recommendation.contains('emergency')) {
-      return 3;
-    } else if (recommendation.contains('vet advice') || recommendation.contains('Withhold food')||recommendation.contains('adequate water')) {
-      return 2;
-    } else if (recommendation.contains('⚠️') || recommendation.contains('Consult vet')) {
-      return 1;
-    }
-    return 0;
-  }
-
-  // 12. Your original recommendation lists (WITH EMOJIS)
+  // Your original recommendation lists (WITH EMOJIS)
   List<String> getRecommendationList(String type) {
     switch (type) {
       case "Dry":
@@ -1189,14 +1034,14 @@ class _ResultScreenState extends State<ResultScreen>
         ];
       case "Watery":
         return [
-          "⚠️ Withhold solid food for 12 to 24 hrs",
-          "Give clean water and homemade electrolyte solution (1 tsp salt + 1 tbsp sugar per liter of water)",
-          "Feed bland diet afterward (boiled chicken and rice)",
-          "Consult vet if persists"
+          "⚠️ Consult a veterinarian immediately if persists",
+          "Withhold solid food for 12 to 24 hrs",
+          "Provide clean water and a vet-approved electrolyte solution",
+          "Feed bland diet afterward (boiled chicken and rice)"
         ];
       case "With Parasite":
         return [
-          "⚠️ Deworm as prescribed by a vet",
+          "⚠️ Regular deworming required",
           "Feed easily digestible, natural meals (boiled sweet potato, squash, or egg)",
           "Keep the feeding area clean"
         ];
