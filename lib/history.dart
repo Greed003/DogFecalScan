@@ -237,7 +237,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                               ),
                                               children: [
                                                 TextSpan(
-                                                  text: "Parasite",
+                                                  text: "Visible Parasite ",
                                                   style: TextStyle(fontWeight: FontWeight.bold),
                                                 ),
                                                 TextSpan(
@@ -279,7 +279,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                               ),
                                               children: [
                                                 TextSpan(
-                                                  text: "Blood ",
+                                                  text: "Visible Blood ",
                                                   style: TextStyle(fontWeight: FontWeight.bold),
                                                 ),
                                                 TextSpan(
@@ -387,12 +387,12 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
     if (parasiteStatus != null && parasiteStatus != "none") {
       final parasiteConfidence = double.tryParse(item["parasiteConfidence"].toString()) ?? 0;
-      findings.add("Parasite (${parasiteConfidence.toStringAsFixed(2)}%)");
+      findings.add("Visible Parasite (${parasiteConfidence.toStringAsFixed(2)}%)");
     }
 
     if (bloodStatus != null && bloodStatus != "none") {
       final bloodConfidence = double.tryParse(item["bloodConfidence"].toString()) ?? 0;
-      findings.add("Blood (${bloodConfidence.toStringAsFixed(2)}%)");
+      findings.add("Visible Blood (${bloodConfidence.toStringAsFixed(2)}%)");
     }
 
     return findings.isEmpty ? "Additional Findings: None" : "Additional Findings: ${findings.join(", ")}";

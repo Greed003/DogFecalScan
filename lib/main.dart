@@ -467,7 +467,7 @@ Future<void> _runModel(File file, {required ImageSource source}) async {
     
     setState(() {
       _loadingProgress = 60.0;
-      _loadingStage = "Checking for parasites...";
+      _loadingStage = "Checking for visible parasites...";
     });
      await Future.delayed(const Duration(milliseconds: 250));
     print("🔄 Running parasite detection...");
@@ -475,7 +475,7 @@ Future<void> _runModel(File file, {required ImageSource source}) async {
     
     setState(() {
       _loadingProgress = 80.0;
-      _loadingStage = "Checking for blood...";
+      _loadingStage = "Checking for visible blood...";
     });
     
     await Future.delayed(const Duration(milliseconds: 250));
@@ -1200,7 +1200,7 @@ class _ResultScreenState extends State<ResultScreen>
                               Padding(
                                 padding: const EdgeInsets.symmetric(vertical: 2.0),
                                 child: Text(
-                                  "• Parasite (${pconfidencePercent}% confidence)",
+                                  "• Visible Parasite (${pconfidencePercent}% confidence)",
                                   style: TextStyle(
                                     fontSize: 16,
                                     color: Colors.orange.shade700,
@@ -1214,7 +1214,7 @@ class _ResultScreenState extends State<ResultScreen>
                               Padding(
                                 padding: const EdgeInsets.symmetric(vertical: 2.0),
                                 child: Text(
-                                  "• Blood (${bconfidencePercent}% confidence)",
+                                  "• Visible Blood (${bconfidencePercent}% confidence)",
                                   style: TextStyle(
                                     fontSize: 16,
                                     color: Colors.orange.shade700,

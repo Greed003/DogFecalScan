@@ -20,6 +20,30 @@ class _ContactVetScreenState extends State<ContactVetScreen> {
       "address": "Urbiztondo, San Juan, La Union",
       "phone": "09175002313"
     },
+    {
+      "city": "San Juan",
+      "clinic": "Elyu Veterinary Clinic",
+      "address": "Slot #2, Agripina Complex, Brgy. Ili Norte, San Juan, La union",
+      "phone": "09568563904"
+    },
+    {
+      "city": "San Fernando City",
+      "clinic": "Clinicovet Animal House",
+      "address": "Carlatan, San Fernando City, La Union",
+      "phone": "09989521895"
+    },
+    {
+      "city": "San Fernando City",
+      "clinic": "Animasolution Inc. Vets&Pets Animal land Veterinary Diagnostic Centre",
+      "address": "Abubo Bldg, Corner Guerrero Rd, San Fernando City, La Union",
+      "phone": "09338121211"
+    },
+    {
+      "city": "San Fernando City",
+      "clinic": "Sa Ce K9 Pawlor Veterinary Clinic",
+      "address": "Quezon Ave., Ilocanos Norte, San Fernando City, La Union",
+      "phone": "09688893332"
+    },
   ];
 
   @override
@@ -210,15 +234,13 @@ class _ContactVetScreenState extends State<ContactVetScreen> {
     }
   }
 
-  /// 💬 Open SMS with no pre-filled message
   void _openSMS(String phone) async {
-    String message = "";
     final smsUri = Uri(
       scheme: 'sms',
       path: phone,
-      queryParameters: {'body': message},
+      queryParameters: {'body': ''}, // Empty message clears auto-fill
     );
-  
+
     if (!await launchUrl(smsUri, mode: LaunchMode.externalApplication)) {
       _showSnackBar("Your device's SMS app cannot handle messages from apps.");
     }
