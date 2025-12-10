@@ -12,14 +12,21 @@ import 'package:flutter_application_1/terms.dart';
 import 'package:flutter_application_1/contact.dart';
 import 'package:flutter_application_1/history.dart';
 import 'package:flutter_application_1/onboarding.dart';
-import 'package:flutter/services.dart' show rootBundle;
-
-void main() {
-  runApp(const DogFecalScanApp());
+void main() async {
+  // 1. Initialize Flutter engine before anything else
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // 2. Preload SharedPreferences in background WITHOUT blocking
+  final prefsFuture = SharedPreferences.getInstance();
+  
+  // 3. Run the app immediately
+  runApp(DogFecalScanApp(prefsFuture: prefsFuture));
 }
 
 class DogFecalScanApp extends StatelessWidget {
-  const DogFecalScanApp({super.key});
+  final Future<SharedPreferences> prefsFuture;
+  
+  const DogFecalScanApp({super.key, required this.prefsFuture});
 
   @override
   Widget build(BuildContext context) {
@@ -30,50 +37,74 @@ class DogFecalScanApp extends StatelessWidget {
         scaffoldBackgroundColor: Colors.black,
         primaryColor: Colors.orange,
       ),
-      home: const EntryPoint(),
+      home: FutureBuilder<SharedPreferences>(
+        future: prefsFuture,
+        builder: (context, snapshot) {
+          // Show splash screen immediately
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const SplashScreen();
+          }
+          
+          // If error, default to onboarding
+          if (snapshot.hasError) {
+            return const OnboardingScreen();
+          }
+          
+          // Check onboarding status
+          final prefs = snapshot.data!;
+          final seenOnboarding = prefs.getBool("seenOnboarding") ?? false;
+          
+          return seenOnboarding ? const HomeScreen() : const OnboardingScreen();
+        },
+      ),
     );
   }
 }
 
-/// ENTRY POINT: Decides whether to show onboarding or home
-class EntryPoint extends StatefulWidget {
-  const EntryPoint({super.key});
-
-  @override
-  State<EntryPoint> createState() => _EntryPointState();
-}
-
-class _EntryPointState extends State<EntryPoint> {
-  bool _isLoading = true;
-  bool _seenOnboarding = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _checkOnboarding();
-  }
-
-  Future<void> _checkOnboarding() async {
-    final prefs = await SharedPreferences.getInstance();
-    final seen = prefs.getBool("seenOnboarding") ?? false;
-    setState(() {
-      _seenOnboarding = seen;
-      _isLoading = false;
-    });
-  }
+class SplashScreen extends StatelessWidget {
+  const SplashScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    return _seenOnboarding ? const HomeScreen() : const OnboardingScreen();
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // Your app logo
+            Container(
+              width: 100,
+              height: 100,
+              decoration: BoxDecoration(
+                color: const Color(0xFFD6B588),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: const Icon(
+                Icons.pets,
+                size: 50,
+                color: Colors.black,
+              ),
+            ),
+            const SizedBox(height: 30),
+            const CircularProgressIndicator(
+              color: Color(0xFFD6B588),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              "DogFecalScan",
+              style: TextStyle(
+                color: Color(0xFFCBBD93),
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
-
 /// Home Screen
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -83,38 +114,44 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  File? _image;
   final picker = ImagePicker();
   Interpreter? _interpreter;
   Interpreter? _yoloInterpreter;
-  List<String> _yoloLabels = [];
-  final double parasiteThreshold = 0.70;
+  final double parasiteThreshold = 0.76;
   Interpreter? _bloodInterpreter;
-  List<String> _bloodLabels = [];
-  final double bloodThreshold = 0.70;
-  String _result = "No result";
+  final double bloodThreshold = 0.85;
   bool _isLoading = false;
   bool _modelsLoaded = false;
   double _loadingProgress = 0.0;
   String _loadingStage = "Starting...";
-  // ✅ Match Python class_names order
   final List<String> _labels = ["Dry", "Watery", "Normal", "Soft"];
 
   @override
   void initState() {
     super.initState();
-    _loadModel();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadModel();
+    });
   }
 
   Future<void> _loadModel() async {
     try {
       setState(() {
         _isLoading = true;
+        _loadingProgress = 0.0;
+        _loadingStage = "Initializing AI models...";
       });
 
       print("⏳ Loading models...");
 
       // ---- CLASSIFICATION MODEL ----
+      setState(() {
+        _loadingProgress = 20.0;
+        _loadingStage = "Loading stool type classifier...";
+      });
+      
+      await Future.delayed(const Duration(milliseconds: 300)); // Smooth delay
+      
       _interpreter = await Interpreter.fromAsset(
         'model/v2.tflite',
         options: InterpreterOptions()
@@ -124,80 +161,122 @@ class _HomeScreenState extends State<HomeScreen> {
 
       print("✅ Classification model loaded.");
 
-      // ---- YOLO PARASITE MODEL ----
+      // ---- YOLO PARASITE MODEL (YOLOv5) ----
+      setState(() {
+        _loadingProgress = 50.0;
+        _loadingStage = "Loading parasite detector...";
+      });
+      
+      await Future.delayed(const Duration(milliseconds: 300));
+      
       _yoloInterpreter = await Interpreter.fromAsset(
-        'model/yolov8_parasite.tflite',
+        'model/parasite-fp16.tflite',
         options: InterpreterOptions()
           ..threads = 4
           ..useNnApiForAndroid = true,
       );
 
-      print("🟢 YOLO model loaded successfully");
+      print("🟢 YOLOv5 parasite model loaded successfully");
 
-      // ---- LOAD YOLO LABELS ----
-      final labelData = await rootBundle.loadString('model/plabels.txt');
-      _yoloLabels =
-          labelData.split('\n').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
-
-      print("🏷️ YOLO labels loaded: $_yoloLabels");
-
-      // ---- YOLO BLOOD MODEL ----
+      // ---- YOLO BLOOD MODEL (YOLOv5) ----
+      setState(() {
+        _loadingProgress = 80.0;
+        _loadingStage = "Loading blood detector...";
+      });
+      
+      await Future.delayed(const Duration(milliseconds: 300));
+      
       _bloodInterpreter = await Interpreter.fromAsset(
-        'model/yolov8_blood.tflite',
+        'model/blood-fp16.tflite',
         options: InterpreterOptions()
           ..threads = 4
           ..useNnApiForAndroid = true,
       );
 
-      print("🩸 YOLO blood model loaded successfully");
+      print("🩸 YOLOv5 blood model loaded successfully");
 
-      // ---- LOAD BLOOD LABELS ----
-      final blabelData = await rootBundle.loadString('model/blabels.txt');
-      _bloodLabels = blabelData
-          .split('\n')
-          .map((e) => e.trim())
-          .where((e) => e.isNotEmpty)
-          .toList();
-
-      print("🏷️ Blood YOLO labels loaded: $_bloodLabels");
-
-      // ---- LOG INPUT SHAPES ----
-      var input1 = _interpreter!.getInputTensor(0);
-      print("📏 Classification Input: shape=${input1.shape}, type=${input1.type}");
-
-      var yoloInput = _yoloInterpreter!.getInputTensor(0);
-      print("📏 YOLO Input: shape=${yoloInput.shape}, type=${yoloInput.type}");
+      // ---- FINAL SETUP ----
+      setState(() {
+        _loadingProgress = 95.0;
+        _loadingStage = "Finalizing setup...";
+      });
+      
+      await Future.delayed(const Duration(milliseconds: 500));
 
       print("🔥 Models fully initialized.");
 
       // ✅ Models successfully loaded
       setState(() {
+        _loadingProgress = 100.0;
+        _loadingStage = "Ready!";
+      });
+
+      // Brief delay to show 100% completion
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      setState(() {
         _modelsLoaded = true;
         _isLoading = false;
       });
 
-    } catch (e) {
-      print("❌ Failed to load model: $e");
+    } catch (e, stack) {
+      print("❌ Failed to load model: $e\n$stack");
       setState(() {
         _isLoading = false;
         _modelsLoaded = false;
+        _loadingStage = "Failed to load models. Please restart the app.";
       });
     }
+  }
+
+  void _showErrorDialog(String message) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF4B2E1E),
+        title: const Text(
+          "Error",
+          style: TextStyle(color: Color(0xFFCBBD93)),
+        ),
+        content: Text(
+          message,
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text(
+              "OK",
+              style: TextStyle(color: Color(0xFFD6B588)),
+            ),
+          ),
+        ],
+      ),
+    );
   }
   
   Future<void> _pickImage(ImageSource source) async {
     try {
-      // ✅ Check if models are loaded before proceeding
       if (!_modelsLoaded) {
         showDialog(
           context: context,
           builder: (context) => AlertDialog(
-            title: const Text("Models Not Ready"),
-            content: const Text("Please wait for the models to finish loading."),
+            backgroundColor: const Color(0xFF4B2E1E),
+            title: const Text(
+              "Models Not Ready",
+              style: TextStyle(color: Color(0xFFCBBD93)),
+            ),
+            content: const Text(
+              "Please wait for the AI models to finish loading.",
+              style: TextStyle(color: Colors.white70),
+            ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
-                child: const Text("OK"),
+                child: const Text(
+                  "OK",
+                  style: TextStyle(color: Color(0xFFD6B588)),
+                ),
               ),
             ],
           ),
@@ -209,18 +288,25 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (pickedFile != null) {
         final File imageFile = File(pickedFile.path);
-
+        
+        // Show processing overlay
         setState(() {
-          _image = imageFile;
+          _isLoading = true;
+          _loadingProgress = 0.0;
+          _loadingStage = "Processing image...";
         });
-
+        
+        // Process the image
         await _runModel(imageFile, source: source);
       }
     } catch (e) {
       print("❌ Error picking image: $e");
+      setState(() {
+        _isLoading = false;
+      });
+      _showErrorDialog("Failed to process image. Please try again.");
     }
   }
-
   Float32List _preprocessImage(File file, int inputSize) {
     final raw = file.readAsBytesSync();
     img.Image? decoded = img.decodeImage(raw);
@@ -231,49 +317,30 @@ class _HomeScreenState extends State<HomeScreen> {
     final Float32List floatList = Float32List(inputSize * inputSize * 3);
     int index = 0;
 
-    final List<double> sample = [];
-
     for (int y = 0; y < resized.height; y++) {
       for (int x = 0; x < resized.width; x++) {
         final pixel = resized.getPixel(x, y);
-
-        // ✅ No normalization, just raw values like Python
-        final r = pixel.r.toDouble();
-        final g = pixel.g.toDouble();
-        final b = pixel.b.toDouble();
-
-        floatList[index++] = r;
-        floatList[index++] = g;
-        floatList[index++] = b;
-
-        if (sample.length < 9) {
-          sample.addAll([r, g, b]);
-        }
+        floatList[index++] = pixel.r.toDouble();
+        floatList[index++] = pixel.g.toDouble();
+        floatList[index++] = pixel.b.toDouble();
       }
     }
 
-    print("First pixel values (raw): $sample");
-
     return floatList;
   }
-
-  List<double> _yoloPreprocessDouble(File file, int inputSize) {
+  
+   List<double> _yoloPreprocessDouble(File file, int inputSize) {
     final raw = file.readAsBytesSync();
     img.Image? decoded = img.decodeImage(raw);
     if (decoded == null) throw Exception("YOLO decode error");
 
-    // Resize to model input
-    img.Image resized =
-        img.copyResize(decoded, width: inputSize, height: inputSize);
-
+    img.Image resized = img.copyResize(decoded, width: inputSize, height: inputSize);
     final List<double> floatList = List.filled(inputSize * inputSize * 3, 0.0);
     int index = 0;
 
     for (int y = 0; y < resized.height; y++) {
       for (int x = 0; x < resized.width; x++) {
         final pixel = resized.getPixel(x, y);
-
-        // Normalize to 0.0 - 1.0
         floatList[index++] = pixel.r / 255.0;
         floatList[index++] = pixel.g / 255.0;
         floatList[index++] = pixel.b / 255.0;
@@ -299,6 +366,9 @@ class _HomeScreenState extends State<HomeScreen> {
     var outputTensor = _bloodInterpreter!.getOutputTensor(0);
     List outputShape = outputTensor.shape;
 
+    // YOLOv5 typically outputs [1, 25200, 85] or similar
+    // Format: [batch, num_detections, 5+num_classes]
+    // For blood detection, we typically have 1 class (blood)
     List<List<List<double>>> outputBuffer = [
       List.generate(outputShape[1], (_) => List.filled(outputShape[2], 0.0))
     ];
@@ -310,17 +380,19 @@ class _HomeScreenState extends State<HomeScreen> {
 
     List<double> validScores = [];
 
-    // Collect all detections above threshold
+    // Parse YOLOv5 output
     for (var det in outputBuffer[0]) {
-      double score = det[4];
-      if (score >= bloodThreshold) {
-        validScores.add(score);
+      // det[4] is the objectness score in YOLOv5
+      double confidence = det[4];
+      
+      // For single-class detection (blood), we use the objectness score
+      if (confidence >= bloodThreshold) {
+        validScores.add(confidence);
       }
     }
 
     if (validScores.isNotEmpty) {
-      double avgConfidence =
-          validScores.reduce((a, b) => a + b) / validScores.length;
+      double avgConfidence = validScores.reduce((a, b) => a + b) / validScores.length;
       
       print("🩸 Blood detected! Average confidence: ${avgConfidence.toStringAsFixed(4)}");
       return {"status": "with_blood", "confidence": avgConfidence};
@@ -357,18 +429,18 @@ class _HomeScreenState extends State<HomeScreen> {
 
     List<double> validScores = [];
 
-    // Collect all detections ≥ threshold
+    // Parse YOLOv5 output for parasite detection
     for (var det in outputBuffer[0]) {
-      double score = det[4]; // confidence
-      if (score >= parasiteThreshold) {
-        validScores.add(score);
+      double confidence = det[4]; // objectness score
+      
+      // For single-class parasite detection
+      if (confidence >= parasiteThreshold) {
+        validScores.add(confidence);
       }
     }
 
     if (validScores.isNotEmpty) {
-      double avgConfidence =
-          validScores.reduce((a, b) => a + b) / validScores.length;
-
+      double avgConfidence = validScores.reduce((a, b) => a + b) / validScores.length;
       print("🐛 Parasite detected! Average confidence: ${avgConfidence.toStringAsFixed(4)}");
       return {"status": "with_parasite", "confidence": avgConfidence};
     } else {
@@ -696,8 +768,7 @@ Future<void> _runModel(File file, {required ImageSource source}) async {
               ],
             ),
           ),
-
-          // Model Loading Overlay
+          // Change this part in your Stack widget:
           if (_isLoading && !_modelsLoaded)
             Container(
               color: Colors.black87,
@@ -712,7 +783,7 @@ Future<void> _runModel(File file, {required ImageSource source}) async {
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 40.0),
                       child: Text(
-                        "Loading models...",
+                        _loadingStage, // CHANGED FROM HARDCODED TEXT
                         style: const TextStyle(
                           color: Color(0xFFCBBD93),
                           fontSize: 18,
@@ -721,73 +792,83 @@ Future<void> _runModel(File file, {required ImageSource source}) async {
                         textAlign: TextAlign.center,
                       ),
                     ),
+                    const SizedBox(height: 10),
+                    // ADD THIS - Progress percentage
+                    Text(
+                      "${_loadingProgress.toInt()}%",
+                      style: const TextStyle(
+                        color: Color(0xFFCBBD93),
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
                   ],
                 ),
               ),
             ),
 
-// Image Processing Overlay - Simple Design
-if (_isLoading && _modelsLoaded)
-  Container(
-    width: MediaQuery.of(context).size.width,
-    height: MediaQuery.of(context).size.height,
-    color: Colors.black87,
-    child: Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          // Loading Text
-          Text(
-            _loadingStage,
-            style: const TextStyle(
-              color: Color(0xFFCBBD93),
-              fontSize: 18,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          
-          const SizedBox(height: 30),
-          
-          // Progress Bar Container
-          Container(
-            width: MediaQuery.of(context).size.width * 0.7,
-            height: 8,
-            decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.3),
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Stack(
-              children: [
-                // Progress Fill
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 300),
-                  curve: Curves.easeOut,
-                  width: (MediaQuery.of(context).size.width * 0.7) * (_loadingProgress / 100),
-                  height: 8,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFD6B588),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
+          // Image Processing Overlay - Simple Design
+          if (_isLoading && _modelsLoaded)
+            Container(
+              width: MediaQuery.of(context).size.width,
+              height: MediaQuery.of(context).size.height,
+              color: Colors.black87,
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    // Loading Text
+                    Text(
+                      _loadingStage,
+                      style: const TextStyle(
+                        color: Color(0xFFCBBD93),
+                        fontSize: 18,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    
+                    const SizedBox(height: 30),
+                    
+                    // Progress Bar Container
+                    Container(
+                      width: MediaQuery.of(context).size.width * 0.7,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.3),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Stack(
+                        children: [
+                          // Progress Fill
+                          AnimatedContainer(
+                            duration: const Duration(milliseconds: 300),
+                            curve: Curves.easeOut,
+                            width: (MediaQuery.of(context).size.width * 0.7) * (_loadingProgress / 100),
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFD6B588),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    
+                    const SizedBox(height: 15),
+                    
+                    // Percentage
+                    Text(
+                      "${_loadingProgress.toInt()}%",
+                      style: const TextStyle(
+                        color: Color(0xFFCBBD93),
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
-          ),
-          
-          const SizedBox(height: 15),
-          
-          // Percentage
-          Text(
-            "${_loadingProgress.toInt()}%",
-            style: const TextStyle(
-              color: Color(0xFFCBBD93),
-              fontSize: 16,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
-    ),
-  ),
         ],
       ),
     );
