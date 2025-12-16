@@ -12,14 +12,12 @@ import 'package:flutter_application_1/terms.dart';
 import 'package:flutter_application_1/contact.dart';
 import 'package:flutter_application_1/history.dart';
 import 'package:flutter_application_1/onboarding.dart';
+
 void main() async {
-  // 1. Initialize Flutter engine before anything else
   WidgetsFlutterBinding.ensureInitialized();
   
-  // 2. Preload SharedPreferences in background WITHOUT blocking
   final prefsFuture = SharedPreferences.getInstance();
   
-  // 3. Run the app immediately
   runApp(DogFecalScanApp(prefsFuture: prefsFuture));
 }
 
@@ -119,7 +117,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Interpreter? _yoloInterpreter;
   final double parasiteThreshold = 0.76;
   Interpreter? _bloodInterpreter;
-  final double bloodThreshold = 0.85;
+  final double bloodThreshold = 0.86;
   bool _isLoading = false;
   bool _modelsLoaded = false;
   double _loadingProgress = 0.0;
