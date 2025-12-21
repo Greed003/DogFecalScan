@@ -117,7 +117,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Interpreter? _yoloInterpreter;
   final double parasiteThreshold = 0.76;
   Interpreter? _bloodInterpreter;
-  final double bloodThreshold = 0.86;
+  final double bloodThreshold = 0.87;
   bool _isLoading = false;
   bool _modelsLoaded = false;
   double _loadingProgress = 0.0;
