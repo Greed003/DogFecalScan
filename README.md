@@ -17,7 +17,7 @@ It also provides health insights and recommendations based on the classification
 - 🤖 **AI Classification** – Classifies stool into 4 categories.
 - 📊 **History Tracking** – View past classifications with dates, results, and icons.
 - 🎨 **Dark Brown & Gold Theme** – Clean and pet-friendly UI design.
-- ⚡ **Offline Support** (with TensorFlow Lite model, if added).
+- ⚡ **Offline Support** (with TensorFlow Lite model).
 
 ---
 
