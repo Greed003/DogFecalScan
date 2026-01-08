@@ -77,7 +77,12 @@ flutter pub get
 flutter run
 ```
 
+---
+
 ## 🧪 Useful Flutter Commands
+
+---
+
 ```bash
 flutter devices        # List connected devices
 flutter run -d chrome  # Run on Chrome (web)
