@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:flutter_application_1/main.dart';
+import 'dart:io';
+import 'main.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -15,9 +16,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final List<Map<String, String>> onboardingData = [
     {
       "image": "images/logo.png",
-      "title": "Dog Fecal Scan",
+      "title": "DogFecalScan",
       "subtitle":
-          "A mobile app that helps check your dog's digestive health through stool analysis.",
+          "An offline mobile application for canine fecal classification and dietary recommendations.",
       "button": "Get Started"
     },
     {
@@ -28,21 +29,78 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     },
     {
       "image": "images/poo.png",
-      "title": "Classify Feces Automatically",
+      "title": "Automatic Classification",
       "subtitle": "",
       "button": "Next"
     },
     {
       "image": "images/bowl.png",
-      "title": "Receive Dietary Recommendations",
+      "title": "Dietary Recommendations",
       "subtitle": "",
       "button": "Finish"
     },
   ];
 
+  @override
+  void initState() {
+    super.initState();
+    _checkDisclaimer();
+  }
+
+  Future<void> _checkDisclaimer() async {
+    final prefs = await SharedPreferences.getInstance();
+    final accepted = prefs.getBool('acceptedDisclaimer') ?? false;
+
+    if (!accepted) {
+      Future.delayed(Duration.zero, () => _showDisclaimerDialog());
+    }
+  }
+
+  void _showDisclaimerDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        title: const Text("Disclaimer"),
+        content: const Text(
+          "DogFecalScan is intended FOR DOGS ONLY.\n\n"
+          "Results and dietary recommendations are for "
+          "informational purposes and do not replace "
+          "professional veterinary advice.\n\n"
+          "Consult a licensed veterinarian for serious or "
+          "persistent health concerns.",
+          textAlign: TextAlign.justify,
+          style: TextStyle(fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => exit(0),
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.grey.shade400,
+            ),
+            child: const Text("Exit"),
+          ),
+          ElevatedButton(
+             style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF8D6E63), 
+            ),
+            onPressed: () async {
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.setBool('acceptedDisclaimer', true);
+              Navigator.pop(context);
+            },
+            child: const Text(
+              "I Understand",
+              style: TextStyle(color: Colors.white),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _nextPage(int index) async {
     if (index == onboardingData.length - 1) {
-      // Save onboarding as seen
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool("seenOnboarding", true);
 
@@ -76,9 +134,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 }
 
-/// ONBOARDING PAGE WIDGET
+/// ✅ ONBOARDING PAGE WIDGET (THIS FIXES YOUR ERROR)
 class OnboardingPage extends StatelessWidget {
-  final String image, title, subtitle, buttonText;
+  final String image;
+  final String title;
+  final String subtitle;
+  final String buttonText;
   final VoidCallback onPressed;
 
   const OnboardingPage({
@@ -101,24 +162,20 @@ class OnboardingPage extends StatelessWidget {
             const Spacer(),
             Image.asset(image, height: 150),
             const SizedBox(height: 30),
-            if (title.isNotEmpty)
-              Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFFCBBD93),
-                ),
-                textAlign: TextAlign.center,
+            Text(
+              title,
+              style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFFCBBD93),
               ),
+              textAlign: TextAlign.center,
+            ),
             if (subtitle.isNotEmpty) ...[
               const SizedBox(height: 10),
               Text(
                 subtitle,
-                style: const TextStyle(
-                  fontSize: 14,
-                  color: Colors.white,
-                ),
+                style: const TextStyle(fontSize: 14, color: Colors.white),
                 textAlign: TextAlign.center,
               ),
             ],
