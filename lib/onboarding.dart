@@ -73,10 +73,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           style: TextStyle(fontSize: 13),
         ),
         actions: [
-          TextButton(
+          OutlinedButton(
             onPressed: () => exit(0),
-            style: TextButton.styleFrom(
-              foregroundColor: Colors.grey.shade400,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.white70,
+              side: const BorderSide(color: Colors.white38),
             ),
             child: const Text("Exit"),
           ),
