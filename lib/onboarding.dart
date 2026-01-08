@@ -72,28 +72,34 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           textAlign: TextAlign.justify,
           style: TextStyle(fontSize: 13),
         ),
-        actions: [
-          OutlinedButton(
-            onPressed: () => exit(0),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.white70,
-              side: const BorderSide(color: Colors.white38),
-            ),
-            child: const Text("Exit"),
-          ),
-          ElevatedButton(
-             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF8D6E63), 
-            ),
-            onPressed: () async {
-              final prefs = await SharedPreferences.getInstance();
-              await prefs.setBool('acceptedDisclaimer', true);
-              Navigator.pop(context);
-            },
-            child: const Text(
-              "I Understand",
-              style: TextStyle(color: Colors.white),
-            ),
+       actions: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              OutlinedButton(
+                onPressed: () => exit(0),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white70,
+                  side: const BorderSide(color: Colors.white38),
+                ),
+                child: const Text("Exit"),
+              ),
+              const SizedBox(width: 12), // space between buttons
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF8D6E63), // Brown
+                ),
+                onPressed: () async {
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.setBool('acceptedDisclaimer', true);
+                  Navigator.pop(context);
+                },
+                child: const Text(
+                  "I Understand",
+                  style: TextStyle(color: Colors.white),
+                ),
+              ),
+            ],
           ),
         ],
       ),

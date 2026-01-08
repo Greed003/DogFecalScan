@@ -1,4 +1,4 @@
-# 🐶 Dog Fecal Scan App
+# 🐶 DogFecalScan App
 
 A **Flutter mobile app** that helps pet owners monitor their dogs’ digestive health.  
 The app classifies dog feces into four categories using AI:
@@ -14,21 +14,18 @@ It also provides health insights and recommendations based on the classification
 
 ## 📱 Features
 - 📷 **Image Capture & Upload** – Take or select a stool image.
-- 🤖 **AI Classification** – Classifies stool into 4 categories.
-- 📊 **History Tracking** – View past classifications with dates, results, and icons.
-- 🎨 **Dark Brown & Gold Theme** – Clean and pet-friendly UI design.
+- 🤖 **Dual AI Analysis** 
+    - Stool Type Classification (4 categories)
+    - Abnormality Detection using YOLOv5 (parasites, blood)
+- 📊 **History Tracking** – View past classifications with dates, results, and abnormality flags.
+- 🎨 **Brown & Black Theme** – Clean and pet-friendly UI design.
 - ⚡ **Offline Support** (with TensorFlow Lite model).
-
----
-
-## 📸 Screenshots
-(Add screenshots here once available)
 
 ---
 
 ## 🛠️ Tech Stack
 - **Frontend:** Flutter (Dart)
-- **ML Model:** TensorFlow Lite / MobileNetV3 (planned integration)
+- **ML Model:** TensorFlow Lite / MobileNetV3 and YOLOv5
 - **State Management:** setState (can upgrade to Provider/Bloc)
 - **Storage:** Local storage (SQLite / SharedPreferences for history)
 
